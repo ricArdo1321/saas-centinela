@@ -1,0 +1,125 @@
+```Proyecto SaaS Centinela Cloud/.gitignore#L1-200
+# --------------------------------------------
+# Centinela Cloud - .gitignore (Node + Go + Docker)
+# --------------------------------------------
+
+# OS / editor
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+.idea/
+*.iml
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Node / TS
+node_modules/
+dist/
+build/
+out/
+coverage/
+.nyc_output/
+.cache/
+.eslintcache
+*.tsbuildinfo
+
+# Next/Nuxt (if ever added)
+.next/
+.nuxt/
+.output/
+
+# Vite
+.vite/
+
+# Turborepo
+.turbo/
+
+# Go
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go build/cache
+bin/
+tmp/
+vendor/
+**/vendor/
+go.work
+go.work.sum
+
+# Go tooling / local overrides
+.air.toml
+.gomodcache/
+
+# Docker / Compose
+**/.docker/
+docker-data/
+**/docker-data/
+**/data/
+**/*-data/
+**/volumes/
+**/.compose/
+**/compose.override.yml
+**/docker-compose.override.yml
+
+# Kubernetes / Helm (if later)
+*.tgz
+charts/*.tgz
+
+# Databases / local state
+*.sqlite
+*.sqlite3
+*.db
+*.rdb
+dump.rdb
+
+# Postgres / Redis volumes (commonly mounted)
+postgres_data/
+redis_data/
+
+# Certificates / keys
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+
+# Test artifacts
+junit.xml
+test-results/
+playwright-report/
+**/screenshots/
+**/videos/
+
+# Misc
+*.swp
+*.swo
+*~
