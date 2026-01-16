@@ -1,7 +1,6 @@
-```Proyecto SaaS Centinela Cloud/.github/workflows/deploy-vps.yml#L1-170
 name: Deploy to VPS (Docker Compose)
 
-"on":
+on:
   push:
     branches: ["main"]
   workflow_dispatch: {}
