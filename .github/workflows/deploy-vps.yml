@@ -1,0 +1,92 @@
+```Proyecto SaaS Centinela Cloud/.github/workflows/deploy-vps.yml#L1-170
+name: Deploy to VPS (Docker Compose)
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-vps-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          # Write private key from GitHub Secrets
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          # Add VPS host key (avoid interactive prompt). This is better than disabling host key checking.
+          ssh-keyscan -p "${{ secrets.VPS_SSH_PORT }}" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy (SSH -> git pull -> docker compose)
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PORT: ${{ secrets.VPS_SSH_PORT }}
+          PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
+        run: |
+          set -euo pipefail
+
+          # Remote paths / settings
+          REMOTE_APP_DIR="/srv/centinela"
+          REPO_URL="https://github.com/${{ github.repository }}.git"
+          BRANCH="main"
+
+          # Create an SSH command helper
+          SSH="ssh -p ${VPS_SSH_PORT} -i ~/.ssh/id_ed25519 ${VPS_USER}@${VPS_HOST}"
+
+          # Ensure base dir exists
+          $SSH "mkdir -p ${REMOTE_APP_DIR}"
+
+          # Clone if missing, otherwise fetch+reset to branch
+          $SSH "if [ ! -d '${REMOTE_APP_DIR}/.git' ]; then
+                  git clone --branch '${BRANCH}' --depth 1 '${REPO_URL}' '${REMOTE_APP_DIR}';
+                else
+                  cd '${REMOTE_APP_DIR}' &&
+                  git fetch --prune origin '${BRANCH}' &&
+                  git reset --hard 'origin/${BRANCH}';
+                fi"
+
+          # Write prod env file on VPS (never commit it)
+          # Stored as a GitHub Secret to keep credentials out of the repo.
+          $SSH "cd '${REMOTE_APP_DIR}/ops' && cat > .env.prod <<'EOF'
+          ${PROD_ENV_FILE}
+          EOF
+          chmod 600 .env.prod"
+
+          # Deploy using production compose file
+          $SSH "cd '${REMOTE_APP_DIR}/ops' &&
+                docker compose --env-file .env.prod -f docker-compose.prod.yml pull || true &&
+                docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build"
+
+          # Show running services (useful in logs)
+          $SSH "cd '${REMOTE_APP_DIR}/ops' && docker compose -f docker-compose.prod.yml ps"
+
+      - name: Post-deploy smoke check (healthz)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # If your API_DOMAIN points to the VPS and is already live, this will validate the deployment.
+          # Otherwise, this step may fail until DNS/TLS is ready.
+          if [ -n "${{ secrets.API_HEALTHCHECK_URL }}" ]; then
+            curl -fsS "${{ secrets.API_HEALTHCHECK_URL }}" >/dev/null
+          else
+            echo "Skipping healthcheck (set secret API_HEALTHCHECK_URL to enable, e.g. https://api.tu-dominio.com/healthz)"
+          fi

@@ -8,15 +8,27 @@ El MVP prioriza: **anti-spam by design**, **email-first**, instalación simple c
 
 ## Estado del proyecto
 
-Este repositorio está inicializándose. El objetivo inmediato es dejar un esqueleto funcional con:
+Este repositorio está inicializándose. El objetivo inmediato es dejar un esqueleto funcional **listo para producción** con:
 
 - `collector`: escucha syslog (UDP/TCP), adjunta metadatos y reenvía al backend.
-- `backend`: API de ingesta + motor de reglas + batching + envío de emails.
-- `ops`: Docker Compose para levantar todo en un VPS o en local.
+- `backend`: API de ingesta + normalización + motor de reglas + batching + envío de emails + endpoints para UI.
+- `worker`: procesamiento asíncrono (parsing, reglas, batching, IA).
+- `ops`: Docker Compose para levantar todo **en un VPS (Hostinger KM1)** y también en local.
+- `frontend`: se desplegará en **Vercel** (fuera de este repo o en un repo separado), consumiendo la API del VPS por HTTPS.
+
+Además, el MVP incluirá **IA** para:
+- enriquecimiento/clasificación durante la ingesta (sin reemplazar el parsing determinista),
+- procesamiento (resumen, priorización, agrupación),
+- proposición de soluciones (recomendaciones accionables basadas en playbooks).
 
 ---
 
 ## Objetivo del MVP (30 días)
+
+Entregar un MVP operable con:
+- **Backend + DB + workers en un VPS Hostinger KM1** (Docker Compose) detrás de TLS.
+- **Frontend en Vercel** consumiendo `https://api.tu-dominio.com`.
+- Pipeline completo: **syslog FortiGate → detección → batching → email**, con **IA** para enriquecer, resumir y recomendar acciones.
 
 ### Qué hace (MVP)
 1. Recibe syslog FortiGate desde un `collector` (Docker) dentro de la red del cliente.
@@ -32,12 +44,18 @@ Este repositorio está inicializándose. El objetivo inmediato es dejar un esque
 
 ### Qué NO hace (a propósito)
 - No pretende ser un SIEM.
-- No requiere dashboards complejos (UI mínima solo para configuración).
+- No requiere dashboards complejos (UI mínima solo para configuración y revisión básica).
 - No envía un correo por evento.
+- No depende de IA para parsear syslog: el parsing/normalización es **determinista** y auditable.
 
 ---
 
 ## Decisiones de producto / arquitectura (MVP)
+
+### Deploy target: VPS + Vercel
+- **VPS Hostinger KM1**: `backend`, `worker`, `postgres`, `redis`, reverse proxy con TLS.
+- **Vercel**: `frontend` (ej. Next.js) consumiendo la API del VPS.
+- El backend debe soportar `X-Forwarded-*` y CORS limitado al/los dominios del frontend.
 
 ### Mercado inicial
 - FortiGate como fuente principal (syslog).
@@ -60,6 +78,24 @@ Este repositorio está inicializándose. El objetivo inmediato es dejar un esque
 ---
 
 ## Componentes (carpetas)
+
+- `collector/`  
+  Servicio ligero para recibir syslog (UDP/TCP), agregar metadatos (`tenant`, `site`, `source`) y reenviar por HTTPS al backend.
+
+- `backend/`  
+  API + módulos para:
+  - ingesta autenticada
+  - parsing/normalización determinista
+  - exposición de datos para UI (detecciones/digests)
+  - configuración mínima por tenant (destinatarios, ventanas, etc.)
+
+- `ops/`  
+  Infra para local/VPS:
+  - Docker Compose (dev/prod)
+  - reverse proxy + TLS
+  - variables de entorno y scripts de deploy
+
+> Nota: el `frontend` se desplegará en **Vercel** (idealmente como proyecto Next.js) y consumirá la API del VPS.
 
 - `collector/`  
   Servicio ligero para recibir syslog (UDP/TCP), agregar metadatos (`tenant`, `site`, `source`) y reenviar por HTTPS al backend.
@@ -137,17 +173,21 @@ El MVP se construye para Modo A, manteniendo la posibilidad de empaquetarlo para
 
 ## Stack propuesto (MVP en VPS/Docker)
 
-Como el repo está vacío, propongo un stack estándar y rápido:
+Stack orientado a **VPS Hostinger KM1 + Frontend en Vercel**:
 
-- **Backend**: Node.js + TypeScript (Fastify o NestJS)
-- **DB**: Postgres
-- **Cache/locks** (opcional MVP): Redis
-- **Jobs**: worker interno (BullMQ si Redis; o cron + DB locks)
-- **Emails**: SMTP (Mailgun/SendGrid) o Postfix relay (según VPS)
-- **Collector**: Go o Node (Go recomendado por footprint y syslog UDP/TCP robusto)
-- **Deploy**: Docker Compose (`ops/docker-compose.yml`)
+- **Backend**: Node.js + TypeScript (Fastify recomendado por footprint)  
+- **Worker/Jobs**: BullMQ + Redis (procesamiento asíncrono: parsing, reglas, batching, IA)  
+- **DB**: Postgres  
+- **Reverse proxy + TLS**: Caddy (recomendado por simplicidad) o Nginx  
+- **Emails**: SMTP vía proveedor (Mailgun/SendGrid). Evitar “correo directo” desde VPS por deliverability.  
+- **Collector**: Go (recomendado por robustez UDP/TCP y footprint)  
+- **Frontend**: Vercel (Next.js recomendado), consumiendo `https://api.tu-dominio.com`
 
-> Si ya tienes preferencia (Python/FastAPI, Go, .NET), se ajusta. La prioridad es shipping rápido.
+### IA (en el MVP)
+En KM1 normalmente no conviene correr modelos locales. Para el MVP se recomienda:
+- **IA vía API cloud** (OpenAI/Anthropic/Azure OpenAI u otro), llamada desde el `worker`.
+- IA siempre **asíncrona** (no bloquea la ingesta).
+- Minimización/redacción de datos antes de enviar a IA (según política del tenant).
 
 ---
 
@@ -188,16 +228,49 @@ En FortiGate, configura syslog hacia el `collector`:
 
 ## Desarrollo local (plan)
 
-Cuando exista el esqueleto:
-
 1. Levanta infraestructura:
    - `docker compose up -d` (en `ops/`)
-2. Levanta backend:
-   - `pnpm dev` o `npm run dev` (en `backend/`)
+2. Levanta backend + worker:
+   - `pnpm dev` / `npm run dev` (backend)
+   - `pnpm worker` / `npm run worker` (worker) (según scripts)
 3. Levanta collector:
    - `docker compose up collector` o binario local
 4. Envía un syslog de prueba:
-   - `echo "<134>date host ... msg" | nc -u 127.0.0.1 514`
+   - `echo "<134>date host ... msg" | nc -u 127.0.0.1 5514`
+
+> En producción, el `frontend` se despliega en Vercel y el backend en el VPS con TLS (reverse proxy).
+
+---
+
+## Plan de desarrollo (VPS Hostinger KM1 + Vercel + IA)
+
+### Arquitectura de despliegue (target)
+- **VPS (KM1)**:
+  - reverse proxy con TLS (Caddy/Nginx)
+  - `backend` (API)
+  - `worker` (jobs: parsing, reglas, batching, IA)
+  - `postgres` (persistente)
+  - `redis` (colas)
+  - (opcional) SMTP de dev local; en prod usar Mailgun/SendGrid
+- **Vercel**:
+  - `frontend` (Next.js recomendado)
+  - `NEXT_PUBLIC_API_BASE_URL=https://api.tu-dominio.com`
+
+### IA: alcance y enfoque (MVP)
+- **No** usar IA para parsear syslog crudo como mecanismo principal.
+- Sí usar IA para:
+  1) **Ingesta (enriquecimiento y clasificación)**: familia de evento, confianza, `risk_score` y “razones”.
+  2) **Procesamiento**: resumen ejecutivo, priorización y agrupación de detecciones en “incidentes” (opcional v2).
+  3) **Proposición de soluciones**: recomendaciones accionables basadas en un catálogo de playbooks (IA redacta/adapta, no inventa pasos).
+
+### Plan por fases (resumen)
+1. **Base prod en VPS**: DNS + TLS + compose prod (sin exponer DB/Redis) + healthchecks.
+2. **Backend listo para Vercel**: CORS, soporte `X-Forwarded-*`, endpoints mínimos para UI.
+3. **Ingesta + collector**: `/v1/ingest/syslog` autenticado + syslog UDP/TCP → POST.
+4. **Parsing/normalización determinista**: FortiGate key=value robusto.
+5. **Reglas MVP + batching + email**: 1–2 reglas + digest consolidado + auditoría `email_digests`.
+6. **IA v1**: resumen + recomendaciones guiadas por playbooks (async, con caching y rate limit).
+7. **Hardening**: retención, backups `pg_dump`, seguridad de red, costos/limitación por tenant.
 
 ---
 

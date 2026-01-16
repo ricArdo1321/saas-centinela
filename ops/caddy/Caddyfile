@@ -1,0 +1,61 @@
+```Proyecto SaaS Centinela Cloud/ops/caddy/Caddyfile#L1-120
+{
+	# Optional: set ACME contact email via environment variable
+	{$ACME_EMAIL}
+
+	# Make logs useful in a VPS environment
+	log {
+		level INFO
+		format console
+	}
+
+	# Optional: use a production-safe admin endpoint behavior
+	# admin off
+}
+
+# Public API domain (TLS is automatic via ACME when API_DOMAIN is a real domain)
+{$API_DOMAIN} {
+	# Security headers (safe defaults for an API)
+	header {
+		# Prevent MIME sniffing
+		X-Content-Type-Options "nosniff"
+		# Reduce referrer leakage
+		Referrer-Policy "no-referrer"
+		# HSTS (enable once you're confident HTTPS is stable)
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		# Basic hardening
+		Permissions-Policy "interest-cohort=()"
+		# Remove Server header where possible
+		-Server
+	}
+
+	# Health endpoint can be useful for quick manual checks
+	@health path /healthz
+	handle @health {
+		reverse_proxy backend:{$BACKEND_PORT_INTERNAL} {
+			# Ensure upstream sees the real client/proto/host
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-Host {host}
+			header_up Host {host}
+		}
+	}
+
+	# Default: proxy everything to the backend container
+	handle {
+		reverse_proxy backend:{$BACKEND_PORT_INTERNAL} {
+			# Preserve correct forwarding headers for apps behind proxies
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-Host {host}
+			header_up Host {host}
+
+			# Optional: tune timeouts for long requests (keep conservative)
+			transport http {
+				dial_timeout 10s
+				response_header_timeout 30s
+				idle_timeout 2m
+			}
+		}
+	}
+}

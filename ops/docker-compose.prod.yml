@@ -1,0 +1,174 @@
+```Proyecto SaaS Centinela Cloud/ops/docker-compose.prod.yml#L1-220
+name: centinela
+
+services:
+  reverse-proxy:
+    image: caddy:2-alpine
+    container_name: centinela-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Public API hostname, used by Caddy for TLS certificates.
+      # Example: api.tu-dominio.com
+      API_DOMAIN: ${API_DOMAIN:-localhost}
+      # Optional: set to your email to receive ACME notifications.
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      # Caddyfile template rendered at container start
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates / state
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: centinela-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-centinela}
+      POSTGRES_USER: ${POSTGRES_USER:-centinela}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-centinela} -d ${POSTGRES_DB:-centinela}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: centinela-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      - internal
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: centinela-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: ${BACKEND_PORT_INTERNAL:-3000}
+
+      # DB / Redis (internal network only)
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-centinela}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-centinela}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+
+      # Ingest auth (collector -> backend)
+      INGEST_SHARED_SECRET: ${INGEST_SHARED_SECRET:?set INGEST_SHARED_SECRET in .env.prod}
+
+      # Retention
+      RETENTION_DAYS: ${RETENTION_DAYS:-7}
+
+      # Email (SMTP provider recommended: Mailgun/SendGrid)
+      EMAIL_FROM: ${EMAIL_FROM:-"Centinela <alerts@example.com>"}
+      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST in .env.prod}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+
+      # Locale
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-es}
+
+      # Public URL (used for links in emails)
+      APP_BASE_URL: ${APP_BASE_URL:-https://${API_DOMAIN}}
+
+      # CORS: allow your Vercel app domain(s)
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.tu-dominio.com}
+
+      # AI (recommended: cloud API). Do NOT set if you want IA disabled.
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_PROMPT_VERSION: ${AI_PROMPT_VERSION:-v1}
+    expose:
+      - "${BACKEND_PORT_INTERNAL:-3000}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${BACKEND_PORT_INTERNAL:-3000}/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+    networks:
+      - internal
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: centinela-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+
+      # DB / Redis (internal network only)
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-centinela}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-centinela}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+
+      # Ingest auth (if the worker needs it for internal verification)
+      INGEST_SHARED_SECRET: ${INGEST_SHARED_SECRET:?set INGEST_SHARED_SECRET in .env.prod}
+
+      # Retention
+      RETENTION_DAYS: ${RETENTION_DAYS:-7}
+
+      # Email (SMTP provider)
+      EMAIL_FROM: ${EMAIL_FROM:-"Centinela <alerts@example.com>"}
+      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST in .env.prod}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-es}
+      APP_BASE_URL: ${APP_BASE_URL:-https://${API_DOMAIN}}
+
+      # AI
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_PROMPT_VERSION: ${AI_PROMPT_VERSION:-v1}
+    # NOTE: This assumes your backend image supports running a worker process.
+    # You must implement one of these scripts/commands in backend/package.json:
+    # - "start:worker"
+    # Or adjust the command below to match your actual worker entrypoint.
+    command: ["npm", "run", "start:worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
