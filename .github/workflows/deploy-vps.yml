@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   deploy:
+    name: Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -81,12 +82,14 @@ jobs:
 
       - name: Post-deploy smoke check (healthz)
         shell: bash
+        env:
+          API_HEALTHCHECK_URL: ${{ secrets.API_HEALTHCHECK_URL }}
         run: |
           set -euo pipefail
           # If your API_DOMAIN points to the VPS and is already live, this will validate the deployment.
           # Otherwise, this step may fail until DNS/TLS is ready.
-          if [ -n "${{ secrets.API_HEALTHCHECK_URL }}" ]; then
-            curl -fsS "${{ secrets.API_HEALTHCHECK_URL }}" >/dev/null
+          if [ -n "${API_HEALTHCHECK_URL:-}" ]; then
+            curl -fsS "${API_HEALTHCHECK_URL}" >/dev/null
           else
             echo "Skipping healthcheck (set secret API_HEALTHCHECK_URL to enable, e.g. https://api.tu-dominio.com/healthz)"
           fi
