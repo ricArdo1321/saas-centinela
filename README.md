@@ -33,14 +33,17 @@ Entregar un MVP operable con:
 ### Qué hace (MVP)
 1. Recibe syslog FortiGate desde un `collector` (Docker) dentro de la red del cliente.
 2. Normaliza eventos y ejecuta detecciones (reglas) para casos comunes (VPN/login/bruteforce/admin/config).
-3. Agrupa eventos en ventanas (batching) para evitar alert fatigue.
-4. Envía **correos consolidados** con:
+3. **🤖 AI Log Analyzer**: Analiza patrones complejos con IA (ataques multi-etapa, comportamientos anómalos, correlaciones).
+4. **🤖 AI Action Advisor**: Genera recomendaciones accionables con comandos CLI específicos de FortiGate.
+5. Agrupa eventos en ventanas (batching) para evitar alert fatigue.
+6. Envía **correos consolidados** con:
    - resumen ejecutivo
+   - análisis de IA con contexto
+   - **acciones recomendadas con comandos CLI**
    - timeline
    - IPs/usuarios afectados
    - severidad
-   - recomendaciones accionables
-5. Guarda evidencia mínima con **retención 7 días**.
+7. Guarda evidencia mínima con **retención 7 días**.
 
 ### Qué NO hace (a propósito)
 - No pretende ser un SIEM.
@@ -105,6 +108,8 @@ Entregar un MVP operable con:
   - ingesta
   - parsing/normalización
   - motor de reglas
+  - **🤖 AI Log Analyzer** (análisis con LLM)
+  - **🤖 AI Action Advisor** (recomendaciones con comandos CLI)
   - batching
   - envío de emails
 
@@ -129,13 +134,17 @@ Entregar un MVP operable con:
    - parsea FortiGate (`kv` típico: `key=value`)
    - normaliza a un esquema común (`NormalizedEvent`)
    - ejecuta reglas y genera `Detections`
+   - **🤖 AI Log Analyzer**: analiza patrones y genera `AIDetections`
+   - **🤖 AI Action Advisor**: genera `RecommendedActions` con comandos CLI
    - inserta en DB (Postgres) con `tenant_id`
 5. Worker de batching:
    - agrupa detecciones por ventana (ej. 15 min / 60 min)
    - dedup (misma IP/usuario/tipo)
    - calcula severidad final
+   - integra análisis y acciones de IA
 6. Scheduler:
    - cada `N` minutos genera digest por tenant y envía email
+   - incluye secciones de análisis IA y acciones recomendadas
 7. Se registra el email enviado para evitar duplicados (anti-spam).
 
 ---
