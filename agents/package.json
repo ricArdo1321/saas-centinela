@@ -1,0 +1,37 @@
+{
+  "name": "centinela-agents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Centinela Cloud AI Agents (Orchestrator, Analyst, Advisor, Judge, Writer)",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev:orchestrator": "tsx watch orchestrator/index.ts",
+    "dev:analyst": "tsx watch analyst/index.ts",
+    "dev:advisor": "tsx watch advisor/index.ts",
+    "dev:judge": "tsx watch judge/index.ts",
+    "dev:writer": "tsx watch writer/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "start:orchestrator": "node dist/orchestrator/index.js",
+    "start:analyst": "node dist/analyst/index.js",
+    "start:advisor": "node dist/advisor/index.js",
+    "start:judge": "node dist/judge/index.js",
+    "start:writer": "node dist/writer/index.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "dotenv": "^17.2.3",
+    "fastify": "^5.2.1",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

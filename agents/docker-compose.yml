@@ -1,0 +1,108 @@
+# Centinela Cloud AI Agents - Docker Compose for Development
+# Usage: docker-compose up --build
+
+version: "3.8"
+
+services:
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AGENT: orchestrator
+    container_name: centinela-orchestrator
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=development
+      - PORT=8080
+      - HOST=0.0.0.0
+      - ANALYST_URL=http://analyst:8081
+      - ADVISOR_URL=http://advisor:8082
+      - JUDGE_URL=http://judge:8083
+      - WRITER_URL=http://writer:8084
+    depends_on:
+      - analyst
+      - advisor
+      - judge
+      - writer
+    networks:
+      - centinela-agents
+    restart: unless-stopped
+
+  analyst:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AGENT: analyst
+    container_name: centinela-analyst
+    ports:
+      - "8081:8081"
+    environment:
+      - NODE_ENV=development
+      - PORT=8081
+      - HOST=0.0.0.0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    networks:
+      - centinela-agents
+    restart: unless-stopped
+
+  advisor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AGENT: advisor
+    container_name: centinela-advisor
+    ports:
+      - "8082:8082"
+    environment:
+      - NODE_ENV=development
+      - PORT=8082
+      - HOST=0.0.0.0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    networks:
+      - centinela-agents
+    restart: unless-stopped
+
+  judge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AGENT: judge
+    container_name: centinela-judge
+    ports:
+      - "8083:8083"
+    environment:
+      - NODE_ENV=development
+      - PORT=8083
+      - HOST=0.0.0.0
+    networks:
+      - centinela-agents
+    restart: unless-stopped
+
+  writer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AGENT: writer
+    container_name: centinela-writer
+    ports:
+      - "8084:8084"
+    environment:
+      - NODE_ENV=development
+      - PORT=8084
+      - HOST=0.0.0.0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    networks:
+      - centinela-agents
+    restart: unless-stopped
+
+networks:
+  centinela-agents:
+    driver: bridge
+    name: centinela-agents

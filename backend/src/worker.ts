@@ -15,6 +15,8 @@ import {
     runDetectionRules,
     createDigests,
     sendPendingDigests,
+    getUnreportedDetections,
+    analyzeDetectionWithAI
 } from './services/index.js';
 
 const INTERVAL_MS = parseInt(process.env['WORKER_INTERVAL_MS'] || '60000', 10); // Default: 1 minute
@@ -31,9 +33,24 @@ async function runPipeline(): Promise<void> {
         }
 
         // 2. Run detection rules
-        const detections = await runDetectionRules(15); // Last 15 minutes
-        if (detections > 0) {
-            console.log(`   🚨 Created ${detections} detection(s)`);
+        const detectionsCount = await runDetectionRules(15); // Last 15 minutes
+        if (detectionsCount > 0) {
+            console.log(`   🚨 Created ${detectionsCount} detection(s)`);
+
+            // AI Integration: Analyze High/Critical detections
+            // Fetch detections for main tenant (MVP limitation fixed to 'dev-tenant' or iterates later)
+            // For now we query database directly for recent high severity detections
+            // Actually getUnreportedDetections is per tenant. Let's list detections globally or just use dev-tenant.
+            const highSevDetections = await getUnreportedDetections('dev-tenant');
+
+            for (const det of highSevDetections) {
+                if (det.severity === 'high' || det.severity === 'critical') {
+                    console.log(`   🤖 Analyzing detection ${det.group_key} with AI Agent Swarm...`);
+                    // We pass empty samples for now as we don't have easy access to raw events linked to detection here without a Join
+                    // In production, we should fetch raw_events linked to detection.related_event_ids
+                    await analyzeDetectionWithAI(det, [], []);
+                }
+            }
         }
 
         // 3. Create digests from unreported detections
