@@ -65,6 +65,7 @@ coverage/
 *.dylib
 *.test
 *.out
+collector/collector
 
 # Go build/cache
 bin/

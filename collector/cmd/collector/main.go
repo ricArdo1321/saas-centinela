@@ -1,4 +1,3 @@
-```Proyecto SaaS Centinela Cloud/collector/cmd/collector/main.go#L1-420
 package main
 
 import (
@@ -131,9 +130,9 @@ func loadConfigFromEnv() (Config, error) {
 
 		CollectorName: get("COLLECTOR_NAME"),
 
-		HTTPTimeout:      10 * time.Second,
-		MaxMessageBytes:  32 * 1024, // 32KB
-		MaxRetries:       3,
+		HTTPTimeout:     10 * time.Second,
+		MaxMessageBytes: 32 * 1024, // 32KB
+		MaxRetries:      3,
 	}
 
 	if v := get("HTTP_TIMEOUT_SECONDS"); v != "" {

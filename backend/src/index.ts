@@ -1,4 +1,3 @@
-```Proyecto SaaS Centinela Cloud/backend/src/index.ts#L1-260
 import 'dotenv/config';
 
 import Fastify from 'fastify';
@@ -42,18 +41,14 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
-function verifyIngestAuth(opts: { secret: string; headers: Record<string, any>; rawBody: string }): {
-  ok: boolean;
-  mode: 'token' | 'hmac' | 'none';
-  reason?: string;
-} {
+function verifyIngestAuth(opts: { secret: string; headers: Record<string, any>; rawBody: string }):
+  | { ok: true; mode: 'token' | 'hmac' }
+  | { ok: false; mode: 'token' | 'hmac' | 'none'; reason: string } {
   const token = (opts.headers['x-ingest-token'] ?? opts.headers['X-Ingest-Token']) as string | undefined;
   if (typeof token === 'string' && token.length > 0) {
-    return {
-      ok: safeEqual(token, opts.secret),
-      mode: 'token',
-      reason: safeEqual(token, opts.secret) ? undefined : 'invalid token',
-    };
+    const ok = safeEqual(token, opts.secret);
+    if (ok) return { ok: true, mode: 'token' };
+    return { ok: false, mode: 'token', reason: 'invalid token' };
   }
 
   // Optional HMAC mode:
@@ -71,11 +66,9 @@ function verifyIngestAuth(opts: { secret: string; headers: Record<string, any>; 
     if (Math.abs(nowSec - tsNum) > 300) return { ok: false, mode: 'hmac', reason: 'timestamp out of window' };
 
     const expected = createHmac('sha256', opts.secret).update(`${ts}.${opts.rawBody}`).digest('hex');
-    return {
-      ok: safeEqual(expected, sig),
-      mode: 'hmac',
-      reason: safeEqual(expected, sig) ? undefined : 'invalid signature',
-    };
+    const ok = safeEqual(expected, sig);
+    if (ok) return { ok: true, mode: 'hmac' };
+    return { ok: false, mode: 'hmac', reason: 'invalid signature' };
   }
 
   return { ok: false, mode: 'none', reason: 'missing auth headers' };
@@ -170,7 +163,11 @@ async function main() {
 
     const parsed = SyslogIngestBodySchema.safeParse(json);
     if (!parsed.success) {
-      return reply.badRequest(parsed.error.flatten());
+      return reply.code(400).send({
+        ok: false,
+        error: 'invalid_body',
+        details: parsed.error.flatten(),
+      });
     }
 
     const body: SyslogIngestBody = parsed.data;
@@ -206,11 +203,13 @@ async function main() {
   // Error handler: avoid leaking details in prod
   app.setErrorHandler(async (err, req, reply) => {
     req.log.error({ err }, 'request error');
+    const message = err instanceof Error ? err.message : 'unknown error';
+
     if (env.NODE_ENV === 'development') {
       return reply.code(500).send({
         ok: false,
         error: 'internal_error',
-        message: err.message,
+        message,
       });
     }
     return reply.code(500).send({ ok: false, error: 'internal_error' });
