@@ -9,6 +9,7 @@ import swaggerUi from '@fastify/swagger-ui';
 import { z } from 'zod';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
+import { sql, testConnection, closeDatabase } from './db/index.js';
 
 type Env = {
   NODE_ENV: string;
@@ -94,12 +95,12 @@ async function main() {
     logger:
       env.NODE_ENV === 'development'
         ? {
-            level: 'info',
-            transport: {
-              target: 'pino-pretty',
-              options: { colorize: true, translateTime: 'SYS:standard' },
-            },
-          }
+          level: 'info',
+          transport: {
+            target: 'pino-pretty',
+            options: { colorize: true, translateTime: 'SYS:standard' },
+          },
+        }
         : { level: 'info' },
     genReqId: () => randomUUID(),
     // Important: keep raw body for HMAC verification
@@ -139,6 +140,15 @@ async function main() {
     return { ok: true, service: 'centinela-backend', ts: new Date().toISOString() };
   });
 
+  // Readiness check (includes DB)
+  app.get('/readyz', async (req, reply) => {
+    const dbOk = await testConnection();
+    if (!dbOk) {
+      return reply.code(503).send({ ok: false, service: 'centinela-backend', db: false });
+    }
+    return { ok: true, service: 'centinela-backend', db: true, ts: new Date().toISOString() };
+  });
+
   app.post('/v1/ingest/syslog', async (req, reply) => {
     // Because we replaced parser to parse as string, req.body is a string here.
     const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {});
@@ -172,11 +182,38 @@ async function main() {
 
     const body: SyslogIngestBody = parsed.data;
 
-    // MVP behavior:
-    // - For now, we only acknowledge ingest and log it.
-    // - Next step: insert into Postgres (raw_events), parse FortiGate kv, normalize, and enqueue rules.
+    // Insert into raw_events table
+    let eventId: string | undefined;
+    try {
+      const result = await sql`
+        INSERT INTO raw_events (
+          tenant_id,
+          site_id,
+          source_id,
+          received_at,
+          source_ip,
+          raw_message,
+          collector_name
+        ) VALUES (
+          ${body.tenant_id},
+          ${body.site_id ?? null},
+          ${body.source_id ?? null},
+          ${body.received_at ? new Date(body.received_at) : new Date()},
+          ${body.source_ip ?? null},
+          ${body.raw_message},
+          ${body.collector_name ?? null}
+        )
+        RETURNING id
+      `;
+      eventId = result[0]?.id;
+    } catch (dbError) {
+      req.log.error({ err: dbError }, 'Failed to insert raw_event');
+      // Continue anyway - we don't want to lose events if DB is temporarily unavailable
+    }
+
     req.log.info(
       {
+        event_id: eventId,
         tenant_id: body.tenant_id,
         site_id: body.site_id,
         source_id: body.source_id,
@@ -192,6 +229,7 @@ async function main() {
       ok: true,
       accepted: true,
       request_id: req.id,
+      event_id: eventId,
     });
   });
 
@@ -214,6 +252,25 @@ async function main() {
     }
     return reply.code(500).send({ ok: false, error: 'internal_error' });
   });
+
+  // Test database connection on startup
+  const dbConnected = await testConnection();
+  if (!dbConnected) {
+    app.log.warn('Database connection failed - events will not be persisted until DB is available');
+  } else {
+    app.log.info('Database connection verified');
+  }
+
+  // Graceful shutdown
+  const shutdown = async (signal: string) => {
+    app.log.info({ signal }, 'Shutdown signal received');
+    await app.close();
+    await closeDatabase();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   await app.listen({ host: '0.0.0.0', port: env.PORT });
   app.log.info({ port: env.PORT }, 'centinela-backend listening');
