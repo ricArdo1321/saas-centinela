@@ -45,6 +45,8 @@ coverage/
 .cache/
 .eslintcache
 *.tsbuildinfo
+# Compiled JS files in src (keep only .ts)
+backend/src/*.js
 
 # Next/Nuxt (if ever added)
 .next/
