@@ -1,36 +1,22 @@
 import Fastify from 'fastify';
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import OpenAI from 'openai';
 import dotenv from 'dotenv';
-import pino from 'pino';
 
 dotenv.config();
 
-const logger = pino({
-  name: 'writer-agent',
-  level: process.env.LOG_LEVEL || 'info',
-});
-
 const fastify = Fastify({
-  logger,
+  logger: {
+    level: process.env.LOG_LEVEL || 'info',
+  }
 });
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-  logger.warn('⚠️ GEMINI_API_KEY is missing. Writer will perform poorly or fail.');
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+if (!OPENAI_API_KEY) {
+  fastify.log.warn('⚠️ OPENAI_API_KEY is missing. Writer will fail.');
 }
 
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY || '');
-const MODEL_NAME = process.env.WRITER_MODEL || 'gemini-1.5-flash';
-
-// AI Response Schema for Email
-const writerSchema = {
-  type: SchemaType.OBJECT,
-  properties: {
-    subject: { type: SchemaType.STRING },
-    body: { type: SchemaType.STRING, description: "Full email body in plain text/markdown" }
-  },
-  required: ["subject", "body"]
-} as any;
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+const MODEL_NAME = process.env.WRITER_MODEL || 'gpt-4o-mini';
 
 // Prompt Template
 const SYSTEM_PROMPT = `
@@ -45,30 +31,24 @@ RULES:
 5. Tone: Professional, Urgent but Calm.
 6. Language: Spanish (ES).
 
-Return strict JSON properly structured.
+Return strict JSON with this structure:
+{
+  "subject": string,
+  "body": string (full email body in plain text/markdown)
+}
 `;
 
 fastify.post('/v1/ata/write', async (request, reply) => {
   const startTime = Date.now();
   const { request_id, tenant_id, analysis, recommendations } = request.body as any;
 
-  logger.info({ request_id, tenant_id }, '✍️ Writing report');
+  fastify.log.info({ request_id, tenant_id }, '✍️ Writing report');
 
-  if (!GEMINI_API_KEY) {
+  if (!OPENAI_API_KEY) {
     return reply.code(503).send({ request_id, error: 'AI Provider not configured' });
   }
 
   try {
-    const model = genAI.getGenerativeModel({
-      model: MODEL_NAME,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: writerSchema,
-        temperature: 0.5, // Balance creativity and structure
-      },
-      systemInstruction: SYSTEM_PROMPT
-    });
-
     const userPrompt = JSON.stringify({
       severity: analysis.severity,
       threat_type: analysis.threat_type,
@@ -80,13 +60,23 @@ fastify.post('/v1/ata/write', async (request, reply) => {
       }))
     }, null, 2);
 
-    const result = await model.generateContent(userPrompt);
-    const report = JSON.parse(result.response.text());
+    const completion = await openai.chat.completions.create({
+      model: MODEL_NAME,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.5,
+    });
+
+    const responseText = completion.choices[0]?.message?.content || '{}';
+    const report = JSON.parse(responseText);
 
     const latency_ms = Date.now() - startTime;
-    const tokens_used = result.response.usageMetadata?.totalTokenCount || 0;
+    const tokens_used = completion.usage?.total_tokens || 0;
 
-    logger.info({ request_id, subject: report.subject }, '✅ Report generated');
+    fastify.log.info({ request_id, subject: report.subject }, '✅ Report generated');
 
     return {
       request_id,
@@ -97,7 +87,7 @@ fastify.post('/v1/ata/write', async (request, reply) => {
     };
 
   } catch (error) {
-    logger.error({ request_id, err: error }, '❌ Writer failed');
+    fastify.log.error({ request_id, err: error }, '❌ Writer failed');
     return reply.code(500).send({
       request_id,
       error: {
@@ -116,7 +106,7 @@ const PORT = 8084;
 const start = async () => {
   try {
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
-    logger.info(`Writer Agent listening at http://0.0.0.0:${PORT}`);
+    fastify.log.info(`Writer Agent listening at http://0.0.0.0:${PORT}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

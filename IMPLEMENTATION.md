@@ -81,28 +81,118 @@
 
 ---
 
-## Semana 3 — Integración de IA 🔲
+## Semana 3 — Integración de IA (Agentes ATA) 🔄 En Progreso
+
+### Objetivo
+Reemplazar la lógica monolítica de IA por un equipo de microservicios (Agentes) que se comunican vía protocolo Agente a Agente (ATA). `services/ai-client.ts` actúa como cliente HTTP del Orquestador.
+
+### Completado
+
+- [x] **Contratos ATA definidos** (`agents/ATA.md`)
+  - Endpoints: `/v1/ata/orchestrate`, `/v1/ata/analyze`, `/v1/ata/advise`, `/v1/ata/judge`, `/v1/ata/write`
+  - Payloads JSON con `request_id`, `tenant_id`, tipos estrictos
+  - Timeouts recomendados y manejo de errores estándar
+
+- [x] **Agente Orquestador** (`agents/orchestrator/index.ts`)
+  - Skeleton Fastify en puerto 8080
+  - Coordina flujo Analista → Consejero → Juez → Redactor
+  - Variables de entorno para URLs de agentes downstream
+
+- [x] **Agente Analista de Logs** (`agents/analyst/index.ts`)
+  - Skeleton en puerto 8081
+  - Extrae IOCs y cuenta eventos únicos
+  - TODO: Integrar LLM (Gemini Flash / OpenAI)
+
+- [x] **Agente Consejero de Acción** (`agents/advisor/index.ts`)
+  - Skeleton en puerto 8082
+  - Genera comandos CLI FortiGate placeholder por cada IOC
+  - Mapea severidad → urgencia
+
+- [x] **Agente Juez de Seguridad** (`agents/judge/index.ts`)
+  - Skeleton en puerto 8083
+  - Valida sintaxis FortiOS (regex patterns)
+  - Bloquea IPs privadas (10.x, 172.16-31.x, 192.168.x, 127.x)
+
+- [x] **Agente Redactor de Reportes** (`agents/writer/index.ts`)
+  - Skeleton en puerto 8084
+  - Genera Subject/Body con formato ejecutivo
+  - Secciones: Resumen, IOCs, Acciones Recomendadas
+
+- [x] **Configuración de Agentes**
+  - `agents/package.json` con scripts `dev:*` y `start:*`
+  - `agents/tsconfig.json` para TypeScript
+  - `agents/Dockerfile` multi-stage con ARG AGENT
+
+- [x] **Cliente HTTP Backend** (`backend/src/services/ai-client.ts`)
+  - `AIClient` con retry logic y timeout configurable
+  - `AIPersistenceService` para guardar en `ai_analyses` y `ai_recommendations`
+  - Factory functions: `createAIClient()`, `createAIPersistenceService()`
 
 ### Pendiente
 
-- [ ] **AI Log Analyzer** (`services/ai-analyzer.ts`)
-  - Integración con Gemini/OpenAI API
-  - Prompt engineering para análisis de logs FortiGate
-  - Tabla `ai_analyses` + persistencia
-  - Rate limiting y control de costos (tokens)
+- [ ] **Implementar llamadas LLM reales**
+  - Analista: llamar Gemini Flash API
+  - Consejero: llamar GPT-4o-mini
+  - Redactor: llamar LLM para texto natural
 
-- [ ] **AI Action Advisor** (`services/ai-advisor.ts`)
-  - Prompt especializado en remediación FortiGate
-  - Biblioteca de comandos CLI válidos
-  - Tabla `ai_recommendations` + persistencia
-
-- [ ] **Integración en Pipeline**
-  - Análisis AI después de detección
-  - Recomendaciones en digest email
+- [ ] **Integración en Worker Pipeline**
+  - Modificar `worker.ts` para llamar al Orquestador después de detecciones
+  - Persistir resultados antes del Batcher
 
 - [ ] **Plantilla Email con IA**
-  - Sección "Análisis de IA"
-  - Sección "Acciones Recomendadas"
+  - Actualizar `services/email.ts` para incluir sección "Análisis de IA"
+  - Renderizar comandos CLI en formato legible
+
+- [ ] **Tests de integración**
+  - Mock de agentes para testing local
+  - Verificar flujo completo Orchestrator → Judge retry
+
+### Estructura de Archivos Creados
+
+```
+agents/
+├── ATA.md                    # Contratos y especificación
+├── package.json              # Dependencias compartidas
+├── tsconfig.json             # Config TypeScript
+├── Dockerfile                # Build multi-agente
+├── orchestrator/index.ts     # Puerto 8080
+├── analyst/index.ts          # Puerto 8081
+├── advisor/index.ts          # Puerto 8082
+├── judge/index.ts            # Puerto 8083
+└── writer/index.ts           # Puerto 8084
+
+backend/src/services/
+└── ai-client.ts              # Cliente HTTP + Persistencia
+```
+
+### Variables de Entorno (Agentes)
+
+```bash
+# Orchestrator
+PORT=8080
+ANALYST_URL=http://localhost:8081
+ADVISOR_URL=http://localhost:8082
+JUDGE_URL=http://localhost:8083
+WRITER_URL=http://localhost:8084
+
+# Backend
+ORCHESTRATOR_URL=http://localhost:8080
+AI_TIMEOUT_MS=30000
+AI_RETRY_ATTEMPTS=2
+AI_RETRY_DELAY_MS=1000
+```
+
+### Comandos de Desarrollo
+
+```bash
+cd agents
+npm install
+npm run dev:orchestrator  # Terminal 1
+npm run dev:analyst       # Terminal 2
+npm run dev:advisor       # Terminal 3
+npm run dev:judge         # Terminal 4
+npm run dev:writer        # Terminal 5
+```
 
 ---
 

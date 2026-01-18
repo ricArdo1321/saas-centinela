@@ -1,17 +1,13 @@
 import Fastify from 'fastify';
-import pino from 'pino';
 import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
 
 dotenv.config();
 
-const logger = pino({
-  name: 'orchestrator-agent',
-  level: process.env.LOG_LEVEL || 'info',
-});
-
 const fastify = Fastify({
-  logger,
+  logger: {
+    level: process.env.LOG_LEVEL || 'info',
+  }
 });
 
 // Configuration for downstream agents
@@ -29,11 +25,11 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
   const payload = request.body as any;
   const tenantId = payload.tenant_id;
 
-  logger.info({ reqId, tenantId }, '🎹 Orchestrating ATA Flow');
+  fastify.log.info({ reqId, tenantId }, '🎹 Orchestrating ATA Flow');
 
   try {
     // 1. ANALYST
-    logger.info({ reqId }, '➡️ Calling Analyst...');
+    fastify.log.info({ reqId }, '➡️ Calling Analyst...');
     const analystRes = await fetch(`${AGENTS.analyst}/v1/ata/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -41,17 +37,15 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
     });
     if (!analystRes.ok) throw new Error(`Analyst failed: ${analystRes.statusText}`);
     const analysis = await analystRes.json() as any;
-    logger.info({ reqId, threat: analysis.threat_detected }, '⬅️ Analyst returned');
+    fastify.log.info({ reqId, threat: analysis.threat_detected }, '⬅️ Analyst returned');
 
-    // If no threat detected, short-circuit? 
-    // For now, continue to see what advisor says (maybe advisory for false positives?)
-    // But usually we skip if false positive.
+    // If no threat detected, short-circuit
     if (analysis.threat_detected === false) {
       return { request_id: reqId, analysis, status: 'no_threat_detected' };
     }
 
     // 2. ADVISOR
-    logger.info({ reqId }, '➡️ Calling Advisor...');
+    fastify.log.info({ reqId }, '➡️ Calling Advisor...');
     const advisorRes = await fetch(`${AGENTS.advisor}/v1/ata/advise`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -63,10 +57,9 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
     });
     if (!advisorRes.ok) throw new Error(`Advisor failed: ${advisorRes.statusText}`);
     const recommendations = await advisorRes.json() as any;
-    logger.info({ reqId, actions: recommendations.actions?.length }, '⬅️ Advisor returned');
+    fastify.log.info({ reqId, actions: recommendations.actions?.length }, '⬅️ Advisor returned');
 
     // 3. JUDGE (Validation)
-    // Flatten commands for judging
     const allCommands: string[] = [];
     if (recommendations.actions) {
       for (const act of recommendations.actions) {
@@ -74,9 +67,9 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
       }
     }
 
-    let judgeResult = { result: 'pass', reason: 'No commands to judge' };
+    let judgeResult: any = { result: 'pass', reason: 'No commands to judge' };
     if (allCommands.length > 0) {
-      logger.info({ reqId }, '➡️ Calling Judge...');
+      fastify.log.info({ reqId }, '➡️ Calling Judge...');
       const judgeRes = await fetch(`${AGENTS.judge}/v1/ata/judge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -88,11 +81,11 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
       });
       if (!judgeRes.ok) throw new Error(`Judge failed: ${judgeRes.statusText}`);
       judgeResult = await judgeRes.json() as any;
-      logger.info({ reqId, verdict: judgeResult.result }, '⬅️ Judge returned');
+      fastify.log.info({ reqId, verdict: judgeResult.result }, '⬅️ Judge returned');
     }
 
     // 4. WRITER
-    logger.info({ reqId }, '➡️ Calling Writer...');
+    fastify.log.info({ reqId }, '➡️ Calling Writer...');
     const writerRes = await fetch(`${AGENTS.writer}/v1/ata/write`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -105,7 +98,7 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
     });
     if (!writerRes.ok) throw new Error(`Writer failed: ${writerRes.statusText}`);
     const report = await writerRes.json() as any;
-    logger.info({ reqId }, '⬅️ Writer returned');
+    fastify.log.info({ reqId }, '⬅️ Writer returned');
 
     // Final Response
     const latency_ms = Date.now() - startTime;
@@ -119,7 +112,7 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
     };
 
   } catch (error) {
-    logger.error({ reqId, err: error }, '❌ Orchestration failed');
+    fastify.log.error({ reqId, err: error }, '❌ Orchestration failed');
     return reply.code(500).send({
       request_id: reqId,
       error: {
@@ -138,7 +131,7 @@ const PORT = 8080;
 const start = async () => {
   try {
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
-    logger.info(`Orchestrator Agent listening at http://0.0.0.0:${PORT}`);
+    fastify.log.info(`Orchestrator Agent listening at http://0.0.0.0:${PORT}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

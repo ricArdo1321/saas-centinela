@@ -1,50 +1,22 @@
 import Fastify from 'fastify';
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import OpenAI from 'openai';
 import dotenv from 'dotenv';
-import pino from 'pino';
 
 dotenv.config();
 
-const logger = pino({
-  name: 'advisor-agent',
-  level: process.env.LOG_LEVEL || 'info',
-});
-
 const fastify = Fastify({
-  logger,
+  logger: {
+    level: process.env.LOG_LEVEL || 'info',
+  }
 });
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-  logger.warn('⚠️ GEMINI_API_KEY is missing. Advisor actions will fail.');
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+if (!OPENAI_API_KEY) {
+  fastify.log.warn('⚠️ OPENAI_API_KEY is missing. Advisor actions will fail.');
 }
 
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY || '');
-const MODEL_NAME = process.env.ADVISOR_MODEL || 'gemini-1.5-flash';
-
-// AI Response Schema for Actions
-const advisorSchema = {
-  type: SchemaType.OBJECT,
-  properties: {
-    urgency: { type: SchemaType.STRING, enum: ["immediate", "high", "medium", "low"] },
-    actions: {
-      type: SchemaType.ARRAY,
-      items: {
-        type: SchemaType.OBJECT,
-        properties: {
-          priority: { type: SchemaType.NUMBER },
-          action_name: { type: SchemaType.STRING },
-          description: { type: SchemaType.STRING },
-          cli_commands: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-          risk_level: { type: SchemaType.STRING, enum: ["low", "medium", "high", "critical"] },
-          reversible: { type: SchemaType.BOOLEAN }
-        },
-        required: ["priority", "action_name", "cli_commands", "risk_level"]
-      }
-    }
-  },
-  required: ["urgency", "actions"]
-} as any;
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+const MODEL_NAME = process.env.ADVISOR_MODEL || 'gpt-4o-mini';
 
 // Prompt Template
 const SYSTEM_PROMPT = `
@@ -57,32 +29,35 @@ RULES:
 3. Use specific object names based on the IOCs (e.g., "block_ip_1_2_3_4").
 4. Always include "next" and "end" to close transactions properly.
 5. If the threat is "brute force", suggest blocking the Source IP.
-6. If the threat is "credential stuffing", suggest resetting the user password (if managing local users) or blocking the IP.
+6. If the threat is "credential stuffing", suggest resetting the user password or blocking the IP.
 
-Return strict JSON properly structured.
+Return strict JSON with this structure:
+{
+  "urgency": "immediate" | "high" | "medium" | "low",
+  "actions": [
+    {
+      "priority": number,
+      "action_name": string,
+      "description": string,
+      "cli_commands": string[],
+      "risk_level": "low" | "medium" | "high" | "critical",
+      "reversible": boolean
+    }
+  ]
+}
 `;
 
 fastify.post('/v1/ata/advise', async (request, reply) => {
   const startTime = Date.now();
   const { request_id, tenant_id, analysis } = request.body as any;
 
-  logger.info({ request_id, tenant_id, threat: analysis?.threat_type }, '🛡️ Generating advice');
+  fastify.log.info({ request_id, tenant_id, threat: analysis?.threat_type }, '🛡️ Generating advice');
 
-  if (!GEMINI_API_KEY) {
+  if (!OPENAI_API_KEY) {
     return reply.code(503).send({ request_id, error: 'AI Provider not configured' });
   }
 
   try {
-    const model = genAI.getGenerativeModel({
-      model: MODEL_NAME,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: advisorSchema,
-        temperature: 0.1, // Low temp for precise commands
-      },
-      systemInstruction: SYSTEM_PROMPT
-    });
-
     const userPrompt = JSON.stringify({
       threat_detected: analysis.threat_type,
       severity: analysis.severity,
@@ -90,13 +65,23 @@ fastify.post('/v1/ata/advise', async (request, reply) => {
       context: analysis.context_summary
     }, null, 2);
 
-    const result = await model.generateContent(userPrompt);
-    const advice = JSON.parse(result.response.text());
+    const completion = await openai.chat.completions.create({
+      model: MODEL_NAME,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.1,
+    });
+
+    const responseText = completion.choices[0]?.message?.content || '{}';
+    const advice = JSON.parse(responseText);
 
     const latency_ms = Date.now() - startTime;
-    const tokens_used = result.response.usageMetadata?.totalTokenCount || 0;
+    const tokens_used = completion.usage?.total_tokens || 0;
 
-    logger.info({ request_id, actions: advice.actions?.length }, '✅ Advice generated');
+    fastify.log.info({ request_id, actions: advice.actions?.length }, '✅ Advice generated');
 
     return {
       request_id,
@@ -107,11 +92,11 @@ fastify.post('/v1/ata/advise', async (request, reply) => {
     };
 
   } catch (error) {
-    logger.error({ request_id, err: error }, '❌ Advisor failed');
+    fastify.log.error({ request_id, err: error }, '❌ Advisor failed');
     return reply.code(500).send({
       request_id,
       error: {
-        code: 'AI_ADIVSOR_FAILED',
+        code: 'AI_ADVISOR_FAILED',
         message: error instanceof Error ? error.message : 'Unknown AI error'
       }
     });
@@ -126,7 +111,7 @@ const PORT = 8082;
 const start = async () => {
   try {
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
-    logger.info(`Advisor Agent listening at http://0.0.0.0:${PORT}`);
+    fastify.log.info(`Advisor Agent listening at http://0.0.0.0:${PORT}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
