@@ -1,4 +1,3 @@
-```Proyecto SaaS Centinela Cloud/backend/Dockerfile#L1-70
 # syntax=docker/dockerfile:1.6
 #
 # Centinela Cloud - Backend Dockerfile
