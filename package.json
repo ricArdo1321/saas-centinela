@@ -1,0 +1,22 @@
+{
+  "name": "centinela-cloud",
+  "private": true,
+  "workspaces": ["backend", "frontend", "agents"],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev:backend": "npm run dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:agents:orchestrator": "npm run dev:orchestrator --workspace agents",
+    "dev:agents:analyst": "npm run dev:analyst --workspace agents",
+    "dev:agents:advisor": "npm run dev:advisor --workspace agents",
+    "dev:agents:judge": "npm run dev:judge --workspace agents",
+    "dev:agents:writer": "npm run dev:writer --workspace agents",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspace backend",
+    "format": "npm run format --workspace backend",
+    "format:write": "npm run format:write --workspace backend"
+  }
+}

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { FileText, Bot, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 import { Card, CardContent, Button, Badge, Skeleton } from '../components/UI';
-import { useQuery, api } from '../services/mockApi';
+import { useQuery } from '../hooks/useQuery';
+import { api } from '../services/api';
 import { AIReport } from '../types';
 
 const ReportCard = ({ report }: { report: AIReport; key?: any }) => {
@@ -9,7 +10,7 @@ const ReportCard = ({ report }: { report: AIReport; key?: any }) => {
 
   return (
     <Card className="transition-all duration-200 hover:border-slate-700">
-      <div 
+      <div
         className="p-6 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4"
         onClick={() => setExpanded(!expanded)}
       >
@@ -28,7 +29,7 @@ const ReportCard = ({ report }: { report: AIReport; key?: any }) => {
             </div>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); }}>
             Exportar PDF

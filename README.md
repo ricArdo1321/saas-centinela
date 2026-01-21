@@ -1,8 +1,36 @@
-```Proyecto SaaS Centinela Cloud/README.md#L1-220
 # Centinela Cloud (MVP) — FortiGate Syslog → Detección → Batching → Email
 
 Centinela Cloud es un SaaS B2B orientado a equipos IT pequeños/medianos que necesitan convertir syslog (FortiGate primero) en **decisiones operativas claras** sin “alert spam”.  
 El MVP prioriza: **anti-spam by design**, **email-first**, instalación simple con **collector ligero**, y **retención de 7 días**.
+
+## Inicio rapido (local)
+
+1. Instala dependencias en la raiz (workspaces):
+   - `npm install`
+2. Prepara variables de entorno del backend:
+   - Copia `backend/.env.example` a `backend/.env` y ajusta valores.
+3. Levanta servicios (en terminales separadas):
+   - `npm run dev:backend`
+   - `npm run dev:frontend`
+   - `npm run dev:agents:orchestrator`
+4. Verifica salud del backend:
+   - `curl http://localhost:3000/healthz`
+
+## Workspaces y scripts
+
+- `npm run build`: build en todos los paquetes.
+- `npm run typecheck`: typecheck en todos los paquetes (si aplica).
+- `npm run lint`: lint del backend.
+- `npm run format`: verifica formato del backend.
+
+## Variables de entorno (backend)
+
+Variables requeridas/mas comunes:
+- `DATABASE_URL=postgres://centinela:centinela_dev_password@localhost:5432/centinela`
+- `INGEST_SHARED_SECRET=change-me-min-16-chars`
+- `APP_BASE_URL=http://localhost:3000`
+- `CORS_ORIGINS=http://localhost:3001,http://localhost:5173`
+- `ATA_ORCHESTRATOR_URL=http://localhost:8080`
 
 ---
 

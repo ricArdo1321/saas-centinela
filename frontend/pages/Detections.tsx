@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Filter, Calendar, AlertTriangle } from 'lucide-react';
-import { 
-  Card, CardContent, CardHeader, CardTitle, 
-  Table, TableHeader, TableRow, TableHead, TableCell, 
-  Badge, Button, Sheet, Skeleton, LoadingSpinner 
+import {
+  Card, CardContent, CardHeader, CardTitle,
+  Table, TableHeader, TableRow, TableHead, TableCell,
+  Badge, Button, Sheet, Skeleton, LoadingSpinner
 } from '../components/UI';
-import { useQuery, api } from '../services/mockApi';
+import { useQuery } from '../hooks/useQuery';
+import { api } from '../services/api';
 import { Detection } from '../types';
 
 export const Detections = () => {
@@ -14,7 +15,7 @@ export const Detections = () => {
   const [filterSeverity, setFilterSeverity] = useState<string>('all');
 
   // Filter Logic
-  const filteredData = detections?.filter(d => 
+  const filteredData = detections?.filter(d =>
     filterSeverity === 'all' || d.severity === filterSeverity
   ) || [];
 
@@ -46,7 +47,7 @@ export const Detections = () => {
         </div>
         <div className="flex gap-2">
           <div className="relative">
-            <select 
+            <select
               className="bg-slate-900 border border-slate-700 text-sm rounded-lg px-3 py-2 text-slate-300 focus:ring-primary focus:border-primary appearance-none pr-8"
               value={filterSeverity}
               onChange={(e) => setFilterSeverity(e.target.value)}
@@ -96,7 +97,7 @@ export const Detections = () => {
                     <TableCell><span className="font-mono text-slate-400">{d.source_ip}</span></TableCell>
                     <TableCell>
                        <span className={`text-xs font-medium ${
-                         d.status === 'new' ? 'text-blue-400' : 
+                         d.status === 'new' ? 'text-blue-400' :
                          d.status === 'investigating' ? 'text-orange-400' : 'text-emerald-400'
                        }`}>
                          {translateStatus(d.status)}
@@ -111,8 +112,8 @@ export const Detections = () => {
       </Card>
 
       {/* Detail Slide-over */}
-      <Sheet 
-        isOpen={!!selectedDetection} 
+      <Sheet
+        isOpen={!!selectedDetection}
         onClose={() => setSelectedDetection(null)}
         title="Análisis de Detección"
       >
@@ -144,7 +145,7 @@ export const Detections = () => {
                 {JSON.stringify(selectedDetection.evidence, null, 2)}
               </pre>
             </div>
-            
+
             <div className="pt-4 flex gap-2">
               <Button className="flex-1">Tomar Acción</Button>
               <Button variant="outline" className="flex-1">Descartar</Button>

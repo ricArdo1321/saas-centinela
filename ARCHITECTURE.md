@@ -1,4 +1,3 @@
-```Proyecto SaaS Centinela Cloud/ARCHITECTURE.md#L1-260
 # Centinela Cloud — Arquitectura MVP (FortiGate Syslog → Detección → Batching → Email)
 
 Este documento define una arquitectura **implementable** para el MVP de Centinela Cloud desplegado en **VPS + Docker**, con foco en **anti-spam by design**, **email-first**, **multi-tenant**, y **retención 7 días**.

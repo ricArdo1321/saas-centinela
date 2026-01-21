@@ -1,4 +1,3 @@
-```Proyecto SaaS Centinela Cloud/collector/Dockerfile#L1-80
 # syntax=docker/dockerfile:1.6
 #
 # Centinela Cloud - Collector Dockerfile

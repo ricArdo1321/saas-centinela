@@ -1,6 +1,7 @@
 import 'dotenv/config';
 
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
@@ -10,6 +11,7 @@ import { z } from 'zod';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import { sql, testConnection, closeDatabase } from './db/index.js';
+import { dashboardRoutes } from './routes/dashboard.js';
 
 type Env = {
   NODE_ENV: string;
@@ -114,6 +116,13 @@ async function main() {
 
   await app.register(helmet);
 
+  // CORS for frontend
+  await app.register(cors, {
+    origin: process.env['CORS_ORIGINS']?.split(',') || ['http://localhost:3001', 'http://localhost:5173', 'https://fortinet.editorialfusiones.com'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true,
+  });
+
   await app.register(sensible);
 
   await app.register(rateLimit, {
@@ -135,6 +144,9 @@ async function main() {
   await app.register(swaggerUi, {
     routePrefix: '/docs',
   });
+
+  // Register routes
+  await app.register(dashboardRoutes);
 
   app.get('/healthz', async () => {
     return { ok: true, service: 'centinela-backend', ts: new Date().toISOString() };

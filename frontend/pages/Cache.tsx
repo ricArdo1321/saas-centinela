@@ -2,7 +2,8 @@ import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Zap, Database, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, Table, TableHeader, TableRow, TableHead, TableCell, Skeleton } from '../components/UI';
-import { useQuery, api } from '../services/mockApi';
+import { useQuery } from '../hooks/useQuery';
+import { api } from '../services/api';
 
 export const Cache = () => {
   const { data: patterns, isLoading } = useQuery('cache-patterns', api.getCachePatterns);

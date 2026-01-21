@@ -1,4 +1,3 @@
-```Proyecto SaaS Centinela Cloud/backend/eslint.config.js#L1-200
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
