@@ -1,5 +1,5 @@
 import React, { PropsWithChildren } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { Detections } from './pages/Detections';
@@ -32,13 +32,13 @@ const AppRoutes = () => {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-      
+
       <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/detections" element={<ProtectedRoute><Detections /></ProtectedRoute>} />
       <Route path="/ai-reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
       <Route path="/cache" element={<ProtectedRoute><Cache /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-      
+
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

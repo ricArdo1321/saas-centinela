@@ -100,5 +100,20 @@ export const api = {
     const response = await fetch(`${API_BASE_URL}/v1/detections/${id}`);
     if (!response.ok) throw new Error('Failed to fetch detection details');
     return await response.json();
+  },
+
+  /**
+   * Fetch AI cache statistics
+   */
+  getCacheStats: async (): Promise<{ total_patterns: number; valid_patterns: number; total_hits: number }> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/cache/stats`);
+    if (!response.ok) throw new Error('Failed to fetch cache stats');
+
+    const result = await response.json();
+    return {
+      total_patterns: result.stats?.total_patterns ?? 0,
+      valid_patterns: result.stats?.valid_patterns ?? 0,
+      total_hits: result.stats?.total_hits ?? 0
+    };
   }
 };
