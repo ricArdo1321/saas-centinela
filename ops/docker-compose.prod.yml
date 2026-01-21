@@ -1,4 +1,3 @@
-```Proyecto SaaS Centinela Cloud/ops/docker-compose.prod.yml#L1-220
 name: centinela
 
 services:
@@ -36,7 +35,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-centinela} -d ${POSTGRES_DB:-centinela}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-centinela} -d ${POSTGRES_DB:-centinela}" ]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -47,11 +46,11 @@ services:
     image: redis:7-alpine
     container_name: centinela-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command: [ "redis-server", "--appendonly", "yes" ]
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      test: [ "CMD-SHELL", "redis-cli ping | grep -q PONG" ]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -108,7 +107,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${BACKEND_PORT_INTERNAL:-3000}/healthz >/dev/null 2>&1 || exit 1"]
+      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:${BACKEND_PORT_INTERNAL:-3000}/healthz >/dev/null 2>&1 || exit 1" ]
       interval: 10s
       timeout: 3s
       retries: 30
@@ -154,7 +153,7 @@ services:
     # You must implement one of these scripts/commands in backend/package.json:
     # - "start:worker"
     # Or adjust the command below to match your actual worker entrypoint.
-    command: ["npm", "run", "start:worker"]
+    command: [ "npm", "run", "start:worker" ]
     depends_on:
       postgres:
         condition: service_healthy
