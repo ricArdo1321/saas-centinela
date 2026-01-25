@@ -1,13 +1,21 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { sql } from '../db/index.js';
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, createHash, randomUUID } from 'node:crypto';
+import { parseFortiGateLog } from '../parsers/fortigate.js';
+import { normalizeEvent } from '../services/normalizer.js';
+import { RULES, matchesRuleCriteria } from '../services/rules-engine.js';
 
 // Schema for creating a new source
 const CreateSourceSchema = z.object({
     name: z.string().min(3).max(100),
     site_id: z.string().uuid().optional(),
     type: z.enum(['fortigate_syslog']).default('fortigate_syslog'),
+});
+
+const TestLogSchema = z.object({
+    log: z.string().min(1),
+    source_type: z.enum(['fortigate_syslog']).default('fortigate_syslog')
 });
 
 /**
@@ -90,6 +98,60 @@ export const sourcesRoutes: FastifyPluginAsync = async (fastify) => {
                 }
             }
         };
+    });
+
+    // Test Log Parser & Rules
+    fastify.post('/v1/sources/test-log', {
+        preHandler: fastify.verifyAuth,
+    }, async (req, reply) => {
+        const tenantId = req.user?.tenantId;
+        if (!tenantId) return reply.code(401).send({ error: 'Unauthorized' });
+
+        const result = TestLogSchema.safeParse(req.body);
+        if (!result.success) {
+            return reply.code(400).send({ error: 'Invalid input', details: result.error });
+        }
+
+        const { log } = result.data;
+
+        try {
+            // 1. Parse
+            const parsed = parseFortiGateLog(log);
+
+            // 2. Normalize
+            const context = {
+                id: randomUUID(),
+                tenant_id: tenantId,
+                site_id: null,
+                source_id: null,
+                received_at: new Date(),
+                source_ip: null
+            };
+
+            const normalized = normalizeEvent(parsed, context);
+
+            // 3. Evaluate matches (stateless)
+            const matches = RULES.filter(rule => matchesRuleCriteria(normalized, rule));
+
+            return {
+                status: 'success',
+                parsed,
+                normalized,
+                matches: matches.map(m => ({
+                    rule_id: m.name,
+                    severity: m.severity,
+                    description: m.description,
+                    threshold: m.threshold
+                })),
+                is_threat_candidate: matches.length > 0
+            };
+
+        } catch (err: any) {
+            return {
+                status: 'error',
+                error: err.message
+            };
+        }
     });
 
     // Delete source

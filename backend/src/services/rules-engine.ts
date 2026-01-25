@@ -5,22 +5,7 @@
  */
 
 import { sql } from '../db/index.js';
-
-export interface NormalizedEvent {
-    id: string;
-    tenant_id: string;
-    site_id: string | null;
-    source_id: string | null;
-    ts: Date;
-    event_type: string;
-    subtype: string | null;
-    action: string | null;
-    severity: string;
-    src_ip: string | null;
-    src_user: string | null;
-    message: string | null;
-    raw_kv: Record<string, string>;
-}
+import type { NormalizedEvent } from './normalizer.js';
 
 export interface Detection {
     tenant_id: string;
@@ -266,4 +251,12 @@ export async function getUnreportedDetections(tenantId: string): Promise<Detecti
         evidence: row.evidence as object,
         related_event_ids: (row.related_event_ids as string[]) ?? [],
     }));
+}
+
+/**
+ * Check if a single event matches the criteria for a rule (event type).
+ * Useful for testing logs without DB aggregation.
+ */
+export function matchesRuleCriteria(event: NormalizedEvent, rule: RuleConfig): boolean {
+    return rule.eventTypes.includes(event.event_type);
 }

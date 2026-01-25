@@ -149,6 +149,22 @@ export const api = {
       headers: getAuthHeaders()
     });
     if (!response.ok) throw new Error('Failed to delete source');
+  },
+
+  testLog: async (log: string): Promise<any> => {
+    const response = await fetch(`${API_BASE_URL}/v1/sources/test-log`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({ log, source_type: 'fortigate_syslog' })
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to test log');
+    }
+    return response.json();
   }
 };
 

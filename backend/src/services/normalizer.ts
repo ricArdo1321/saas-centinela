@@ -92,31 +92,38 @@ export async function processRawEvents(batchSize: number = 100): Promise<number>
 }
 
 /**
- * Normalize a single raw event and store in normalized_events.
+ * Normalize a parsed log into a NormalizedEvent structure (pure function).
  */
-async function normalizeAndStore(event: RawEvent): Promise<void> {
-  // Parse the FortiGate log
-  const parsed = parseFortiGateLog(event.raw_message);
-
+export function normalizeEvent(
+  parsed: any,
+  context: {
+    id: string;
+    tenant_id: string;
+    site_id?: string | null;
+    source_id?: string | null;
+    received_at?: Date;
+    source_ip?: string | null
+  }
+): NormalizedEvent {
   // Determine event type and severity
   const eventType = getEventType(parsed);
   const severity = mapSeverity(parsed.level);
 
-  // Parse timestamp from log or use received_at
-  const ts = parseTimestamp(parsed.date, parsed.time, parsed.tz) ?? event.received_at;
+  // Parse timestamp from log or use context
+  const ts = parseTimestamp(parsed.date, parsed.time, parsed.tz) ?? context.received_at ?? new Date();
 
   // Extract user from various fields
   const srcUser = parsed.user ?? parsed.srcuser ?? parsed.xauthuser ?? null;
 
-  // Extract source IP from log or from UI field or use collector-provided
-  const srcIp = parsed.srcip ?? extractIpFromUi(parsed.ui) ?? event.source_ip ?? null;
+  // Extract source IP from log or from UI field or from context
+  const srcIp = parsed.srcip ?? extractIpFromUi(parsed.ui) ?? context.source_ip ?? null;
 
   // Build normalized event
-  const normalized: NormalizedEvent = {
-    raw_event_id: event.id,
-    tenant_id: event.tenant_id,
-    site_id: event.site_id,
-    source_id: event.source_id,
+  return {
+    raw_event_id: context.id,
+    tenant_id: context.tenant_id,
+    site_id: context.site_id ?? null,
+    source_id: context.source_id ?? null,
     ts,
     vendor: 'fortinet',
     product: 'fortigate',
@@ -135,8 +142,25 @@ async function normalizeAndStore(event: RawEvent): Promise<void> {
     policy_id: parsed.policyid ? parseInt(parsed.policyid, 10) : null,
     session_id: parsed.sessionid ?? null,
     message: parsed.msg ?? parsed.logdesc ?? null,
-    raw_kv: parsed.rawKv,
+    raw_kv: parsed.rawKv || {},
   };
+}
+
+/**
+ * Normalize a single raw event and store in normalized_events.
+ */
+async function normalizeAndStore(event: RawEvent): Promise<void> {
+  // Parse the FortiGate log
+  const parsed = parseFortiGateLog(event.raw_message);
+
+  const normalized = normalizeEvent(parsed, {
+    id: event.id,
+    tenant_id: event.tenant_id,
+    site_id: event.site_id,
+    source_id: event.source_id,
+    received_at: event.received_at,
+    source_ip: event.source_ip
+  });
 
   // Insert normalized event and mark raw event as parsed in a transaction
   await sql`
