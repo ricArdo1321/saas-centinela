@@ -1,45 +1,53 @@
-# syntax=docker/dockerfile:1.6
-#
-# Centinela Cloud - Collector Dockerfile
-# Builds a small Go binary and runs it in a minimal image.
-#
+# Stage 1: Builder
+FROM node:20-alpine AS builder
 
-FROM golang:1.22-alpine AS build
-WORKDIR /src
-
-# Install CA certs (for HTTPS calls in some environments during build)
-RUN apk add --no-cache ca-certificates
-
-# Cache deps
-COPY go.mod ./
-# If you add go.sum later, uncomment:
-# COPY go.sum ./
-RUN go mod download
-
-# Copy source
-COPY cmd ./cmd
-
-# Build static-ish binary (CGO disabled)
-ENV CGO_ENABLED=0
-RUN go build -trimpath -ldflags="-s -w" -o /out/centinela-collector ./cmd/collector
-
-
-FROM alpine:3.20 AS runtime
 WORKDIR /app
 
-# Needed for HTTPS (TLS) to backend
-RUN apk add --no-cache ca-certificates && update-ca-certificates
+# Copy package configuration
+COPY package.json ./
 
-# Security hardening: non-root user
-RUN addgroup -S app && adduser -S app -G app
+# Install dependencies (including devDependencies for building)
+RUN npm install
 
-COPY --from=build /out/centinela-collector /app/centinela-collector
+# Copy source code
+COPY tsconfig.json ./
+COPY src ./src
 
-# Default syslog listener ports (non-privileged by default; mapping handled by docker-compose)
-# Expose both UDP/TCP for the same port; actual port is set by LISTEN_UDP/LISTEN_TCP.
-EXPOSE 5514/udp
-EXPOSE 5514/tcp
+# Build TypeScript to JavaScript
+RUN npm run build
 
-USER app
+# Remove devDependencies to shrink image size
+RUN npm prune --production
 
-ENTRYPOINT ["/app/centinela-collector"]
+# Stage 2: Production Runner
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Copy necessary files from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+
+# Create a non-root user for security
+RUN addgroup -S centinela && adduser -S centinela -G centinela
+USER centinela
+
+# Expose ports
+# UDP Syslog (standard: 514, non-privileged: 5140)
+EXPOSE 5140/udp
+
+# TCP Syslog (standard: 514, non-privileged: 5140)
+EXPOSE 5140/tcp
+
+# Health check HTTP endpoint
+EXPOSE 8080/tcp
+
+# Health check for Docker/Kubernetes
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1
+
+# Start the collector
+CMD ["node", "dist/index.js"]

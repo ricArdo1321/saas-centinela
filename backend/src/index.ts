@@ -8,15 +8,17 @@ import sensible from '@fastify/sensible';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { z } from 'zod';
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
-import { sql, testConnection, closeDatabase } from './db/index.js';
+import { testConnection, closeDatabase } from './db/index.js';
 import { dashboardRoutes } from './routes/dashboard.js';
+import authPlugin from './plugins/auth.js';
+import tenantRateLimitPlugin from './plugins/rate-limit-tenant.js';
+import { ingestQueue } from './lib/queue.js';
+import { redis } from './lib/redis.js';
 
 type Env = {
   NODE_ENV: string;
   PORT: number;
-  INGEST_SHARED_SECRET: string;
   APP_BASE_URL: string;
 };
 
@@ -24,101 +26,54 @@ function getEnv(): Env {
   const schema = z.object({
     NODE_ENV: z.string().default('development'),
     PORT: z.coerce.number().int().positive().default(3000),
-    INGEST_SHARED_SECRET: z.string().min(16, 'INGEST_SHARED_SECRET must be at least 16 chars'),
     APP_BASE_URL: z.string().url().default('http://localhost:3000'),
   });
 
   const parsed = schema.safeParse(process.env);
   if (!parsed.success) {
-    // zod error is plenty informative
     throw new Error(`Invalid environment: ${parsed.error.message}`);
   }
   return parsed.data;
 }
 
-function safeEqual(a: string, b: string): boolean {
-  // Avoid leaking length info; normalize to buffers
-  const ab = Buffer.from(a, 'utf8');
-  const bb = Buffer.from(b, 'utf8');
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}
-
-function verifyIngestAuth(opts: { secret: string; headers: Record<string, any>; rawBody: string }):
-  | { ok: true; mode: 'token' | 'hmac' }
-  | { ok: false; mode: 'token' | 'hmac' | 'none'; reason: string } {
-  const token = (opts.headers['x-ingest-token'] ?? opts.headers['X-Ingest-Token']) as string | undefined;
-  if (typeof token === 'string' && token.length > 0) {
-    const ok = safeEqual(token, opts.secret);
-    if (ok) return { ok: true, mode: 'token' };
-    return { ok: false, mode: 'token', reason: 'invalid token' };
-  }
-
-  // Optional HMAC mode:
-  // - X-Ingest-Timestamp: unix epoch seconds (string)
-  // - X-Ingest-Signature: hex(hmac_sha256(secret, `${ts}.${rawBody}`))
-  const ts = (opts.headers['x-ingest-timestamp'] ?? opts.headers['X-Ingest-Timestamp']) as string | undefined;
-  const sig = (opts.headers['x-ingest-signature'] ?? opts.headers['X-Ingest-Signature']) as string | undefined;
-
-  if (typeof ts === 'string' && typeof sig === 'string' && ts.length > 0 && sig.length > 0) {
-    const tsNum = Number(ts);
-    if (!Number.isFinite(tsNum)) return { ok: false, mode: 'hmac', reason: 'invalid timestamp' };
-
-    // Replay window (5 minutes)
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (Math.abs(nowSec - tsNum) > 300) return { ok: false, mode: 'hmac', reason: 'timestamp out of window' };
-
-    const expected = createHmac('sha256', opts.secret).update(`${ts}.${opts.rawBody}`).digest('hex');
-    const ok = safeEqual(expected, sig);
-    if (ok) return { ok: true, mode: 'hmac' };
-    return { ok: false, mode: 'hmac', reason: 'invalid signature' };
-  }
-
-  return { ok: false, mode: 'none', reason: 'missing auth headers' };
-}
-
 const SyslogIngestBodySchema = z.object({
-  tenant_id: z.string().min(1),
+  // Tenant ID is inferred from API Key
   site_id: z.string().min(1).optional(),
   source_id: z.string().min(1).optional(),
   received_at: z.string().datetime().optional(),
   source_ip: z.string().min(1).optional(),
   raw_message: z.string().min(1),
-  // Optional collector metadata
   collector_name: z.string().min(1).optional(),
 });
 
+// Bulk ingest: array of events (max 100 per request)
+const BulkSyslogIngestBodySchema = z.object({
+  events: z.array(SyslogIngestBodySchema).min(1).max(100),
+});
+
 type SyslogIngestBody = z.infer<typeof SyslogIngestBodySchema>;
+type _BulkSyslogIngestBody = z.infer<typeof BulkSyslogIngestBodySchema>;
 
 async function main() {
   const env = getEnv();
 
   const app = Fastify({
-    logger:
-      env.NODE_ENV === 'development'
-        ? {
-          level: 'info',
-          transport: {
-            target: 'pino-pretty',
-            options: { colorize: true, translateTime: 'SYS:standard' },
-          },
-        }
-        : { level: 'info' },
+    logger: env.NODE_ENV === 'development'
+      ? {
+        level: 'info',
+        transport: {
+          target: 'pino-pretty',
+          options: { colorize: true, translateTime: 'SYS:standard' },
+        },
+      }
+      : { level: 'info' },
     genReqId: () => randomUUID(),
-    // Important: keep raw body for HMAC verification
-    bodyLimit: 1024 * 256, // 256KB; syslog lines are tiny but we want some headroom
-  });
-
-  // Keep raw body (Fastify v5 supports this)
-  app.addContentTypeParser('*', { parseAs: 'string' }, function (_req, body, done) {
-    done(null, body);
   });
 
   await app.register(helmet);
 
-  // CORS for frontend
   await app.register(cors, {
-    origin: process.env['CORS_ORIGINS']?.split(',') || ['http://localhost:3001', 'http://localhost:5173', 'https://fortinet.editorialfusiones.com'],
+    origin: process.env['CORS_ORIGINS']?.split(',') || ['http://localhost:3001', 'http://localhost:5173'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
   });
@@ -126,18 +81,27 @@ async function main() {
   await app.register(sensible);
 
   await app.register(rateLimit, {
-    max: 600, // per minute
+    max: 1000,
     timeWindow: '1 minute',
   });
 
   await app.register(swagger, {
     openapi: {
       info: {
-        title: 'Centinela Cloud API (MVP)',
-        version: '0.1.0',
-        description: 'Syslog ingest + detection/batching (WIP).',
+        title: 'Centinela Cloud API',
+        version: '0.2.0',
+        description: 'Multi-tenant Syslog Ingestion & AI Analysis',
       },
       servers: [{ url: env.APP_BASE_URL }],
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'API Key',
+          },
+        },
+      },
     },
   });
 
@@ -145,14 +109,32 @@ async function main() {
     routePrefix: '/docs',
   });
 
-  // Register routes
+  // Register Custom Plugins
+  await app.register(authPlugin);
+
+  // Register Tenant Rate Limiter (uses Redis)
+  await app.register(tenantRateLimitPlugin, {
+    redis,
+    config: {
+      // Override default tiers if needed from environment
+      tiers: {
+        free: { maxRequests: parseInt(process.env['RATE_LIMIT_FREE'] || '100', 10), windowSeconds: 60 },
+        basic: { maxRequests: parseInt(process.env['RATE_LIMIT_BASIC'] || '1000', 10), windowSeconds: 60 },
+        pro: { maxRequests: parseInt(process.env['RATE_LIMIT_PRO'] || '5000', 10), windowSeconds: 60 },
+        enterprise: { maxRequests: parseInt(process.env['RATE_LIMIT_ENTERPRISE'] || '20000', 10), windowSeconds: 60 },
+      },
+      defaultTier: process.env['RATE_LIMIT_DEFAULT_TIER'] || 'basic',
+    },
+    skipRoutes: ['/healthz', '/readyz', '/docs'],
+  });
+
+  // Register Routes
   await app.register(dashboardRoutes);
 
   app.get('/healthz', async () => {
     return { ok: true, service: 'centinela-backend', ts: new Date().toISOString() };
   });
 
-  // Readiness check (includes DB)
   app.get('/readyz', async (req, reply) => {
     const dbOk = await testConnection();
     if (!dbOk) {
@@ -161,96 +143,117 @@ async function main() {
     return { ok: true, service: 'centinela-backend', db: true, ts: new Date().toISOString() };
   });
 
-  app.post('/v1/ingest/syslog', async (req, reply) => {
-    // Because we replaced parser to parse as string, req.body is a string here.
-    const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {});
-    const auth = verifyIngestAuth({
-      secret: env.INGEST_SHARED_SECRET,
-      headers: req.headers as any,
-      rawBody,
+  /**
+   * Ingest Endpoint (Authenticated via API Key + Tenant Rate Limited)
+   */
+  app.post('/v1/ingest/syslog', {
+    preHandler: [app.verifyApiKey, app.tenantRateLimit], // Auth first, then rate limit
+    schema: {
+      security: [{ bearerAuth: [] }],
+      response: {
+        202: {
+          type: 'object',
+          properties: {
+            ok: { type: 'boolean' },
+            accepted: { type: 'boolean' },
+            job_id: { type: 'string' },
+          }
+        },
+      },
+    },
+  }, async (req, reply) => {
+    const tenantId = req.tenantId; // Injected by auth plugin
+
+    if (!tenantId) {
+      return reply.unauthorized('Tenant context missing');
+    }
+
+    // Manual validation
+    const result = SyslogIngestBodySchema.safeParse(req.body);
+    if (!result.success) {
+      return reply.badRequest(JSON.stringify(result.error.format()));
+    }
+
+    const body = result.data;
+
+    // Push to Redis Queue (Async Processing)
+    const job = await ingestQueue.add('syslog-event', {
+      tenant_id: tenantId,
+      ...body,
+      received_at: body.received_at || new Date().toISOString(),
     });
 
-    if (!auth.ok) {
-      req.log.warn({ authMode: auth.mode, reason: auth.reason }, 'ingest auth failed');
-      return reply.unauthorized('Unauthorized');
-    }
-
-    // Parse JSON body
-    let json: unknown;
-    try {
-      json = JSON.parse(rawBody);
-    } catch {
-      return reply.badRequest('Body must be valid JSON');
-    }
-
-    const parsed = SyslogIngestBodySchema.safeParse(json);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        ok: false,
-        error: 'invalid_body',
-        details: parsed.error.flatten(),
-      });
-    }
-
-    const body: SyslogIngestBody = parsed.data;
-
-    // Insert into raw_events table
-    let eventId: string | undefined;
-    try {
-      const result = await sql`
-        INSERT INTO raw_events (
-          tenant_id,
-          site_id,
-          source_id,
-          received_at,
-          source_ip,
-          raw_message,
-          collector_name
-        ) VALUES (
-          ${body.tenant_id},
-          ${body.site_id ?? null},
-          ${body.source_id ?? null},
-          ${body.received_at ? new Date(body.received_at) : new Date()},
-          ${body.source_ip ?? null},
-          ${body.raw_message},
-          ${body.collector_name ?? null}
-        )
-        RETURNING id
-      `;
-      eventId = result[0]?.id;
-    } catch (dbError) {
-      req.log.error({ err: dbError }, 'Failed to insert raw_event');
-      // Continue anyway - we don't want to lose events if DB is temporarily unavailable
-    }
-
-    req.log.info(
-      {
-        event_id: eventId,
-        tenant_id: body.tenant_id,
-        site_id: body.site_id,
-        source_id: body.source_id,
-        source_ip: body.source_ip,
-        received_at: body.received_at,
-        collector_name: body.collector_name,
-        raw_len: body.raw_message.length,
-      },
-      'syslog received'
-    );
+    req.log.debug({ job_id: job.id, tenant_id: tenantId }, 'Syslog event enqueued');
 
     return reply.code(202).send({
       ok: true,
       accepted: true,
-      request_id: req.id,
-      event_id: eventId,
+      job_id: job.id,
     });
   });
 
-  // Simple 404 payload
-  app.setNotFoundHandler(async (_req, reply) => {
-    return reply.code(404).send({ ok: false, error: 'not_found' });
+  /**
+   * Bulk Ingest Endpoint (for Smart Collector optimization)
+   * Accepts up to 100 events per request
+   */
+  app.post('/v1/ingest/syslog/bulk', {
+    preHandler: [app.verifyApiKey, app.tenantRateLimit],
+    schema: {
+      security: [{ bearerAuth: [] }],
+      description: 'Bulk syslog ingestion - accepts up to 100 events per request',
+      response: {
+        202: {
+          type: 'object',
+          properties: {
+            ok: { type: 'boolean' },
+            accepted: { type: 'number' },
+            job_ids: { type: 'array', items: { type: 'string' } },
+          }
+        },
+      },
+    },
+  }, async (req, reply) => {
+    const tenantId = req.tenantId;
+
+    if (!tenantId) {
+      return reply.unauthorized('Tenant context missing');
+    }
+
+    // Validate bulk payload
+    const result = BulkSyslogIngestBodySchema.safeParse(req.body);
+    if (!result.success) {
+      return reply.badRequest(JSON.stringify(result.error.format()));
+    }
+
+    const { events } = result.data;
+    const now = new Date().toISOString();
+
+    // Enqueue all events in parallel
+    const jobs = await Promise.all(
+      events.map(event =>
+        ingestQueue.add('syslog-event', {
+          tenant_id: tenantId,
+          ...event,
+          received_at: event.received_at || now,
+        })
+      )
+    );
+
+    const jobIds = jobs.map(j => j.id).filter((id): id is string => id !== undefined);
+
+    req.log.info(
+      { count: events.length, tenant_id: tenantId },
+      'Bulk syslog events enqueued'
+    );
+
+    return reply.code(202).send({
+      ok: true,
+      accepted: events.length,
+      job_ids: jobIds,
+    });
   });
 
-  // Error handler: avoid leaking details in prod
+  // Global Error Handler
   app.setErrorHandler(async (err, req, reply) => {
     req.log.error({ err }, 'request error');
     const message = err instanceof Error ? err.message : 'unknown error';
@@ -265,15 +268,15 @@ async function main() {
     return reply.code(500).send({ ok: false, error: 'internal_error' });
   });
 
-  // Test database connection on startup
+  // Database Connection
   const dbConnected = await testConnection();
   if (!dbConnected) {
-    app.log.warn('Database connection failed - events will not be persisted until DB is available');
+    app.log.warn('⚠️ Database connection failed at startup');
   } else {
-    app.log.info('Database connection verified');
+    app.log.info('✅ Database connected');
   }
 
-  // Graceful shutdown
+  // Graceful Shutdown
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, 'Shutdown signal received');
     await app.close();
@@ -284,12 +287,13 @@ async function main() {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  await app.listen({ host: '0.0.0.0', port: env.PORT });
-  app.log.info({ port: env.PORT }, 'centinela-backend listening');
+  try {
+    await app.listen({ host: '0.0.0.0', port: env.PORT });
+    app.log.info({ port: env.PORT }, '🚀 Centinela Backend listening');
+  } catch (err) {
+    app.log.error(err);
+    process.exit(1);
+  }
 }
 
-main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error(err);
-  process.exit(1);
-});
+main();

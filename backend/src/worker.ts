@@ -1,11 +1,10 @@
 /**
- * Worker Process
- * 
- * Runs the complete detection pipeline on a schedule:
- * 1. Normalize raw events
- * 2. Run detection rules
- * 3. Create digests
- * 4. Send emails
+ * Worker Process Entry Point
+ *
+ * Orchestrates the background workers using BullMQ:
+ * 1. Pipeline Worker: Periodic processing (Normalize -> Detect -> Schedule AI -> Batch -> Email)
+ * 2. AI Worker: Async processing of heavy AI tasks
+ * 3. Ingest Worker: Async persistence of raw logs from API
  */
 
 import 'dotenv/config';
@@ -15,15 +14,19 @@ import {
     runDetectionRules,
     createDigests,
     sendPendingDigests,
-    getUnreportedDetections,
-    analyzeDetectionWithAI
+    getUnreportedDetections
 } from './services/index.js';
+import { createWorker, QUEUE_NAMES, pipelineQueue, aiAnalysisQueue, closeRedis } from './lib/queue.js';
+import { aiWorker } from './workers/ai-worker.js'; // Imports and starts the AI worker
+import { ingestWorker } from './workers/ingest-worker.js';
 
-const INTERVAL_MS = parseInt(process.env['WORKER_INTERVAL_MS'] || '60000', 10); // Default: 1 minute
+// ----------------------------------------------------------------------
+// Pipeline Worker (Recurring Job)
+// ----------------------------------------------------------------------
 
-async function runPipeline(): Promise<void> {
+const pipelineWorker = createWorker(QUEUE_NAMES.PIPELINE, async (job) => {
     const startTime = Date.now();
-    console.log(`\n🔄 [${new Date().toISOString()}] Running pipeline...`);
+    console.log(`\n🔄 [${new Date().toISOString()}] Executing Pipeline Job ${job.id}...`);
 
     try {
         // 1. Normalize any new raw events
@@ -38,22 +41,30 @@ async function runPipeline(): Promise<void> {
             console.log(`   🚨 Created ${detectionsCount} detection(s)`);
 
             // AI Integration: Analyze High/Critical detections
-            // Fetch detections for main tenant (MVP limitation fixed to 'dev-tenant' or iterates later)
-            // For now we query database directly for recent high severity detections
-            // Actually getUnreportedDetections is per tenant. Let's list detections globally or just use dev-tenant.
+            // Fetch detections for 'dev-tenant' (MVP)
             const highSevDetections = await getUnreportedDetections('dev-tenant');
 
+            let queuedAi = 0;
             for (const det of highSevDetections) {
                 if (det.severity === 'high' || det.severity === 'critical') {
-                    console.log(`   🤖 Analyzing detection ${det.group_key} with AI Agent Swarm...`);
-                    // We pass empty samples for now as we don't have easy access to raw events linked to detection here without a Join
-                    // In production, we should fetch raw_events linked to detection.related_event_ids
-                    await analyzeDetectionWithAI(det, [], []);
+                    // Offload to AI Queue (Async)
+                    await aiAnalysisQueue.add('analyze-threat', {
+                        detection: det,
+                        rawEventsSample: [], // In future: fetch real related events
+                        normalizedEventsSample: []
+                    });
+                    queuedAi++;
                 }
             }
+            if (queuedAi > 0) console.log(`   ➡️  Enqueued ${queuedAi} detection(s) for AI analysis`);
         }
 
         // 3. Create digests from unreported detections
+        // Note: In this async model, batching might happen before AI finishes.
+        // Ideally, we wait or have a separate batching schedule.
+        // For MVP, we proceed. If AI report is ready (fast), it gets included. If not, next time?
+        // Actually, once 'reported_digest_id' is set, it won't be processed again.
+        // A future improvement is to delay batching for high-sev items until AI is 'done' or timed out.
         const digests = await createDigests();
         if (digests.length > 0) {
             console.log(`   📧 Created ${digests.length} digest(s)`);
@@ -66,16 +77,22 @@ async function runPipeline(): Promise<void> {
         }
 
         const elapsed = Date.now() - startTime;
-        console.log(`   ✅ Pipeline completed in ${elapsed}ms`);
+        console.log(`   ✅ Pipeline finished in ${elapsed}ms`);
 
     } catch (error) {
-        console.error('   ❌ Pipeline error:', error);
+        console.error('   ❌ Pipeline failed:', error);
+        throw error; // Triggers BullMQ retry
     }
-}
+});
 
-async function main(): Promise<void> {
-    console.log('🚀 Centinela Worker starting...');
-    console.log(`   Interval: ${INTERVAL_MS}ms`);
+// ----------------------------------------------------------------------
+// Main Entry Point
+// ----------------------------------------------------------------------
+
+async function main() {
+    console.log('🚀 Centinela Queue Workers starting...');
+    console.log(`   AI Worker: ${aiWorker.isRunning() ? 'Online' : 'Offline'}`);
+    console.log(`   Ingest Worker: ${ingestWorker.isRunning() ? 'Online' : 'Offline'}`);
 
     // Test database connection
     const dbOk = await testConnection();
@@ -85,18 +102,35 @@ async function main(): Promise<void> {
     }
     console.log('✅ Database connected');
 
-    // Run immediately on start
-    await runPipeline();
+    // Clean up old schedules to avoid duplicates
+    const repeatableJobs = await pipelineQueue.getRepeatableJobs();
+    for (const job of repeatableJobs) {
+        await pipelineQueue.removeRepeatableByKey(job.key);
+    }
 
-    // Then run on interval
-    const intervalId = setInterval(runPipeline, INTERVAL_MS);
+    // Schedule the Pipeline Job
+    const interval = parseInt(process.env.WORKER_INTERVAL_MS || '60000', 10);
+
+    await pipelineQueue.add('run-pipeline', {}, {
+        repeat: {
+            every: interval
+        }
+    });
+
+    console.log(`   📅 Pipeline scheduled to run every ${interval}ms`);
 
     // Graceful shutdown
     const shutdown = async () => {
-        console.log('\n🛑 Shutting down worker...');
-        clearInterval(intervalId);
+        console.log('\n🛑 Shutting down workers...');
+
+        await pipelineWorker.close();
+        await aiWorker.close();
+        await ingestWorker.close();
+
+        await closeRedis();
         await closeDatabase();
-        console.log('👋 Worker stopped');
+
+        console.log('👋 Workers stopped');
         process.exit(0);
     };
 

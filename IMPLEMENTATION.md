@@ -1,287 +1,167 @@
-# Centinela Cloud - Implementation Plan
+graph TD
+    subgraph Client_Network
+        FG[FortiGate] -->|UDP 514| COL[Smart Collector]
+    end
 
-## Status Overview
-
-| Semana | Objetivo | Estado |
-|--------|----------|--------|
-| **Semana 1** | Esqueleto y primer ingest | ✅ Completada |
-| **Semana 2** | Parsing + reglas + digest | ✅ Completada |
-| **Semana 3** | Integración de IA | 🔲 Pendiente |
-| **Semana 4** | Dashboard + Multi-tenant | 🔲 Pendiente |
-
----
-
-## Semana 1 — Esqueleto y primer ingest ✅
-
-### Completado
-
-- [x] Inicializar repo (git) + estructura `backend/collector/ops`
-- [x] `docker-compose.yml` con Postgres + Redis
-- [x] Backend Fastify con endpoint `/v1/ingest/syslog`
-- [x] Autenticación: token simple + HMAC
-- [x] Cliente Postgres con connection pooling (`postgres.js`)
-- [x] Sistema de migraciones SQL (7 migraciones aplicadas)
-- [x] 12 tablas creadas: tenants, sites, sources, raw_events, normalized_events, detections, digests, email_deliveries, ai_analyses, ai_recommendations, ai_config, _migrations
-- [x] Inserción de eventos raw verificada
-
-### Commits
-
-- `b5afc4c` - Postgres integration + raw_events persistence
-
----
-
-## Semana 2 — Parsing + reglas + digest ✅
-
-### Completado
-
-- [x] **Parser FortiGate** (`parsers/fortigate.ts`)
-  - Extrae campos `key=value` de logs syslog
-  - Detecta tipo de evento: `vpn_*`, `admin_*`, `config_change`, `traffic_*`, `utm_*`
-  - Mapea severidad FortiGate → normalizada (critical, high, medium, low, info)
-  - Extrae IP de campo `ui` (ej: `GUI(107.216.131.59)`)
-
-- [x] **Normalizer Service** (`services/normalizer.ts`)
-  - Procesa `raw_events` → `normalized_events`
-  - Extrae timestamp, user, IP, mensaje
-  - Guarda `raw_kv` como JSONB
-
-- [x] **Rules Engine** (`services/rules-engine.ts`)
-  - `vpn_bruteforce`: 3+ login fails desde misma IP en 15min → HIGH
-  - `admin_bruteforce`: 3+ admin login fails → CRITICAL
-  - `config_change_burst`: 10+ cambios de config en 5min → MEDIUM
-  - Agrupa por `src_ip`, `src_user`, o ambos
-  - Registra en tabla `detections`
-
-- [x] **Batcher Service** (`services/batcher.ts`)
-  - Agrupa detecciones no reportadas por tenant
-  - Crea `digests` con: subject, body_text, severity, window
-  - Vincula detecciones al digest (`reported_digest_id`)
-
-- [x] **Email Service** (`services/email.ts`)
-  - SMTP con nodemailer
-  - Envía digests pendientes
-  - Registra en `email_deliveries` (sent/failed)
-
-- [x] **Worker Process** (`worker.ts`)
-  - Pipeline periódico cada 60s (configurable)
-  - normalize → detect → digest → email
-  - Graceful shutdown
-
-### Commits
-
-- `ac9372d` - FortiGate parser + normalizer service
-- `eaa29a5` - Rules engine + batcher service
-- `e35b067` - Email service + worker process
-
-### Pruebas Realizadas
-
-- ✅ Evento FortiGate real procesado: `config_change` de `carlos.sotolongo`
-- ✅ 24 eventos VPN login fail → detección `vpn_bruteforce` (HIGH)
-- ✅ Digest creado con subject: `⚠️ Centinela Alert: 1 detección(es) - HIGH`
-
----
-
-## Semana 3 — Integración de IA (Agentes ATA) 🔄 En Progreso
-
-### Objetivo
-Reemplazar la lógica monolítica de IA por un equipo de microservicios (Agentes) que se comunican vía protocolo Agente a Agente (ATA). `services/ai-client.ts` actúa como cliente HTTP del Orquestador.
-
-### Completado
-
-- [x] **Contratos ATA definidos** (`agents/ATA.md`)
-  - Endpoints: `/v1/ata/orchestrate`, `/v1/ata/analyze`, `/v1/ata/advise`, `/v1/ata/judge`, `/v1/ata/write`
-  - Payloads JSON con `request_id`, `tenant_id`, tipos estrictos
-  - Timeouts recomendados y manejo de errores estándar
-
-- [x] **Agente Orquestador** (`agents/orchestrator/index.ts`)
-  - Skeleton Fastify en puerto 8080
-  - Coordina flujo Analista → Consejero → Juez → Redactor
-  - Variables de entorno para URLs de agentes downstream
-
-- [x] **Agente Analista de Logs** (`agents/analyst/index.ts`)
-  - Skeleton en puerto 8081
-  - Extrae IOCs y cuenta eventos únicos
-  - TODO: Integrar LLM (Gemini Flash / OpenAI)
-
-- [x] **Agente Consejero de Acción** (`agents/advisor/index.ts`)
-  - Skeleton en puerto 8082
-  - Genera comandos CLI FortiGate placeholder por cada IOC
-  - Mapea severidad → urgencia
-
-- [x] **Agente Juez de Seguridad** (`agents/judge/index.ts`)
-  - Skeleton en puerto 8083
-  - Valida sintaxis FortiOS (regex patterns)
-  - Bloquea IPs privadas (10.x, 172.16-31.x, 192.168.x, 127.x)
-
-- [x] **Agente Redactor de Reportes** (`agents/writer/index.ts`)
-  - Skeleton en puerto 8084
-  - Genera Subject/Body con formato ejecutivo
-  - Secciones: Resumen, IOCs, Acciones Recomendadas
-
-- [x] **Configuración de Agentes**
-  - `agents/package.json` con scripts `dev:*` y `start:*`
-  - `agents/tsconfig.json` para TypeScript
-  - `agents/Dockerfile` multi-stage con ARG AGENT
-
-- [x] **Cliente HTTP Backend** (`backend/src/services/ai-client.ts`)
-  - `AIClient` con retry logic y timeout configurable
-  - `AIPersistenceService` para guardar en `ai_analyses` y `ai_recommendations`
-  - Factory functions: `createAIClient()`, `createAIPersistenceService()`
-
-### Pendiente
-
-- [ ] **Implementar llamadas LLM reales**
-  - Analista: llamar Gemini Flash API
-  - Consejero: llamar GPT-4o-mini
-  - Redactor: llamar LLM para texto natural
-
-- [ ] **Integración en Worker Pipeline**
-  - Modificar `worker.ts` para llamar al Orquestador después de detecciones
-  - Persistir resultados antes del Batcher
-
-- [ ] **Plantilla Email con IA**
-  - Actualizar `services/email.ts` para incluir sección "Análisis de IA"
-  - Renderizar comandos CLI en formato legible
-
-- [ ] **Tests de integración**
-  - Mock de agentes para testing local
-  - Verificar flujo completo Orchestrator → Judge retry
-
-### Estructura de Archivos Creados
+    COL -->|HTTPS + API Key| LB[Load Balancer / Ingress]
+    
+    subgraph Cloud_Infrastructure
+        LB --> API[Backend API]
+        
+        API -->|Auth Check| DB_AUTH[(Auth DB)]
+        API -->|Job| Q_ING[Redis: Ingest Queue]
+        
+        subgraph Workers
+            W_NORM[Pipeline Worker]
+            W_AI[AI Worker]
+        end
+        
+        Q_ING --> W_NORM
+        W_NORM --> DB[(Postgres)]
+        W_NORM -->|High Sev| Q_AI[Redis: AI Queue]
+        
+        Q_AI --> W_AI
+        
+        subgraph AI_Mesh
+            W_AI -->|HTTP| ORCH[Orchestrator]
+            ORCH --> ANA[Analyst Agent]
+            ORCH --> ADV[Advisor Agent]
+            ORCH --> JDG[Judge Agent]
+            ORCH --> WRT[Writer Agent]
+        end
+        
+        WRT -->|Report| DB
+        
+        W_NORM -->|Batch & Send| SMTP[Email Service]
+    end
 
 ```
-agents/
-├── ATA.md                    # Contratos y especificación
-├── package.json              # Dependencias compartidas
-├── tsconfig.json             # Config TypeScript
-├── Dockerfile                # Build multi-agente
-├── orchestrator/index.ts     # Puerto 8080
-├── analyst/index.ts          # Puerto 8081
-├── advisor/index.ts          # Puerto 8082
-├── judge/index.ts            # Puerto 8083
-└── writer/index.ts           # Puerto 8084
 
-backend/src/services/
-└── ai-client.ts              # Cliente HTTP + Persistencia
+---
+
+## Fase 1 — Arquitectura Asíncrona (Queues) ✅
+
+### Objetivos
+Eliminar bloqueos en el procesamiento de logs y permitir escalabilidad horizontal.
+
+### Implementado
+- [x] **Infraestructura BullMQ** (`backend/src/lib/queue.ts`)
+  - Conexión Redis compartida
+  - Colas definidas: `ingest-queue`, `ai-analysis-queue`, `pipeline-queue`
+- [x] **AI Worker** (`backend/src/workers/ai-worker.ts`)
+  - Proceso dedicado para análisis de amenazas
+  - Reintentos automáticos (Backoff exponencial)
+- [x] **Pipeline Worker** (`backend/src/worker.ts`)
+  - Refactorizado de `setInterval` a Job recurrente
+  - Orquesta: Normalización -> Detección -> Batching -> Email
+
+### Commits Clave
+- Instalación de `bullmq` y `ioredis`
+- Refactorización completa de `worker.ts`
+
+---
+
+## Fase 2 — Ingesta Multi-Tenant Segura ✅
+
+### Objetivos
+Permitir que múltiples clientes envíen logs de forma segura e identificada.
+
+### Implementado
+- [x] **Base de Datos**
+  - Tabla `api_keys` creada (Migración `010_api_keys.sql`)
+  - Índices para búsqueda rápida por hash
+- [x] **Plugin de Autenticación** (`backend/src/plugins/auth.ts`)
+  - Estrategia `Bearer Token`
+  - Hashing SHA-256 de keys (nunca se guardan en plano)
+  - Decorador `verifyApiKey` para Fastify
+- [x] **Pipeline de Ingesta Asíncrona**
+  - Endpoint `/v1/ingest/syslog` protegido con `authPlugin`
+  - Encolado de eventos en `ingest-queue` (Redis)
+  - Worker dedicado `ingest-worker.ts` para persistencia en DB
+- [x] **Middleware de Rate Limiting por Tenant** (`backend/src/plugins/rate-limit-tenant.ts`)
+  - Límites configurables por plan (free/basic/pro/enterprise)
+  - Sliding window usando Redis sorted sets
+  - Headers estándar: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+  - Fail-open para no bloquear tráfico en caso de error de Redis
+
+---
+
+## Fase 3 — Smart Collector (Agente de Borde) ✅
+
+### Objetivos
+Crear un agente ligero desplegable en la red del cliente que reenvíe syslogs locales a la nube vía HTTPS seguro.
+
+### Implementado
+- [x] **Workspace Setup** (`collector/`)
+  - TypeScript + Node.js 20
+  - Dockerfile multi-stage optimizado
+  - Configuración con Zod validation
+- [x] **Servidor UDP** (`src/index.ts`)
+  - Escucha syslog en puerto configurable
+  - Buffer en memoria con tail-drop
+- [x] **Servidor TCP** (`src/tcp-server.ts`)
+  - Conexiones concurrentes
+  - Parsing line-based (newline-delimited)
+  - Timeout y cleanup de conexiones
+- [x] **Reintentos con Backoff** (`src/retry-queue.ts`)
+  - Exponential backoff con jitter
+  - Dead Letter Queue (DLQ) para fallos permanentes
+  - Configurable: max retries, delays
+- [x] **Cliente HTTP con Bulk** (`src/transport.ts`)
+  - Usa endpoint `/v1/ingest/syslog/bulk` (100 eventos/request)
+  - Fallback a envío individual si bulk falla
+  - Tracking de métricas y latencia
+- [x] **Health Check Server** (`src/health-server.ts`)
+  - Endpoints: `/healthz`, `/readyz`, `/metrics`, `/status`
+  - Docker HEALTHCHECK integrado
+- [x] **Métricas** (`src/metrics.ts`)
+  - Eventos: received/sent/failed/dropped
+  - Retries: queued/success/dlq
+  - Latency y success rate
+
+### Archivos Principales
 ```
 
-### Variables de Entorno (Agentes)
+collector/
+├── src/
+│   ├── index.ts          # Entry point + UDP server
+│   ├── config.ts         # Zod-validated config
+│   ├── buffer.ts         # In-memory FIFO buffer
+│   ├── transport.ts      # HTTP client with bulk + retry
+│   ├── retry-queue.ts    # Exponential backoff queue
+│   ├── tcp-server.ts     # TCP syslog server
+│   ├── health-server.ts  # HTTP health/metrics
+│   └── metrics.ts        # In-memory metrics
+├── Dockerfile
+├── .env.example
+├── package.json
+└── tsconfig.json
+
+```
+
+---
+
+## Histórico (Semanas 1-3)
+
+### Semana 1-2: MVP Monolítico ✅
+- Ingesta Syslog básica
+- Parsing FortiGate y Normalización
+- Motor de Reglas y Emails
+
+### Semana 3: Agentes AI (ATA) ✅
+- Arquitectura de microservicios para IA
+- Orquestador, Analista, Juez, Redactor
+
+---
+
+## Environment Variables Nuevas
 
 ```bash
-# Orchestrator
-PORT=8080
-ANALYST_URL=http://localhost:8081
-ADVISOR_URL=http://localhost:8082
-JUDGE_URL=http://localhost:8083
-WRITER_URL=http://localhost:8084
+# Redis / Queues
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=...
 
-# Backend
-ORCHESTRATOR_URL=http://localhost:8080
-AI_TIMEOUT_MS=30000
-AI_RETRY_ATTEMPTS=2
-AI_RETRY_DELAY_MS=1000
-```
-
-### Comandos de Desarrollo
-
-```bash
-cd agents
-npm install
-npm run dev:orchestrator  # Terminal 1
-npm run dev:analyst       # Terminal 2
-npm run dev:advisor       # Terminal 3
-npm run dev:judge         # Terminal 4
-npm run dev:writer        # Terminal 5
-```
-
----
-
-## Semana 4 — Dashboard + Multi-tenant 🔲
-
-### Pendiente
-
-- [ ] Frontend Next.js básico
-- [ ] Vista de detecciones por tenant
-- [ ] Gestión de tenants/sites/sources
-- [ ] Autenticación usuario (JWT)
-- [ ] API REST para frontend
-
----
-
-## Environment Variables
-
-```bash
-# Database
-DATABASE_URL=postgres://centinela:password@localhost:5432/centinela
-
-# Backend Auth
-INGEST_SHARED_SECRET=change_me_min_16_chars
-
-# SMTP
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=user
-SMTP_PASS=password
-SMTP_FROM=centinela@example.com
-
-# Alerts
-ALERT_RECIPIENT_EMAIL=admin@example.com
-
-# Worker
-WORKER_INTERVAL_MS=60000
-
-# AI (Semana 3)
-# GEMINI_API_KEY=...
-# OPENAI_API_KEY=...
-```
-
----
-
-## NPM Scripts
-
-```bash
-npm run dev          # Backend en modo desarrollo
-npm run worker       # Worker de pipeline
-npm run db:migrate   # Ejecutar migraciones
-npm run typecheck    # Verificar tipos TypeScript
-npm run lint         # Ejecutar ESLint
-```
-
----
-
-## Arquitectura Actual
-
-```
-┌─────────────────┐     ┌──────────────────┐
-│    Collector    │────▶│  /v1/ingest/     │
-│  (FortiGate)    │     │    syslog        │
-└─────────────────┘     └────────┬─────────┘
-                                 │
-                                 ▼
-                        ┌────────────────┐
-                        │  raw_events    │
-                        └────────┬───────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │   Worker (cada 60s)     │
-                    ├─────────────────────────┤
-                    │ 1. Normalizer           │
-                    │ 2. Rules Engine         │
-                    │ 3. Batcher              │
-                    │ 4. Email Sender         │
-                    └────────────┬────────────┘
-                                 │
-                ┌────────────────┼────────────────┐
-                ▼                ▼                ▼
-        ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-        │ normalized   │ │  detections  │ │   digests    │
-        │   _events    │ │              │ │              │
-        └──────────────┘ └──────────────┘ └──────────────┘
-                                                  │
-                                                  ▼
-                                          ┌──────────────┐
-                                          │    Email     │
-                                          │   (SMTP)     │
-                                          └──────────────┘
+# Security
+INTERNAL_AGENT_SECRET=super_long_secret_shared_between_agents
 ```

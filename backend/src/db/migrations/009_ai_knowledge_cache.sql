@@ -5,12 +5,12 @@
 CREATE TABLE IF NOT EXISTS ai_knowledge_cache (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    
+
     -- Pattern signature (hash of detection characteristics)
     pattern_signature VARCHAR(64) NOT NULL, -- SHA-256 hash
     detection_type VARCHAR(100) NOT NULL,
     severity VARCHAR(20) NOT NULL,
-    
+
     -- Cached AI response
     threat_detected BOOLEAN NOT NULL,
     threat_type VARCHAR(100),
@@ -19,25 +19,26 @@ CREATE TABLE IF NOT EXISTS ai_knowledge_cache (
     recommended_actions JSONB,
     report_subject TEXT,
     report_body TEXT,
-    
+
     -- Usage stats
     hit_count INTEGER NOT NULL DEFAULT 1,
     last_hit_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
+
     -- TTL and validity
     expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days',
     is_valid BOOLEAN NOT NULL DEFAULT TRUE,
-    
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
+
     UNIQUE(tenant_id, pattern_signature)
 );
 
 -- Index for fast cache lookup
+-- NOTE: Removed expires_at > NOW() from predicate as NOW() is not immutable and causes migration failure
 CREATE INDEX IF NOT EXISTS idx_ai_knowledge_cache_lookup
     ON ai_knowledge_cache(tenant_id, pattern_signature)
-    WHERE is_valid = TRUE AND expires_at > NOW();
+    WHERE is_valid = TRUE;
 
 -- Index for cache management
 CREATE INDEX IF NOT EXISTS idx_ai_knowledge_cache_expiry
@@ -71,7 +72,7 @@ DECLARE
 BEGIN
     DELETE FROM ai_knowledge_cache
     WHERE expires_at < NOW() OR is_valid = FALSE;
-    
+
     GET DIAGNOSTICS deleted_count = ROW_COUNT;
     RETURN deleted_count;
 END;

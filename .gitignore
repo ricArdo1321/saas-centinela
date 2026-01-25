@@ -125,3 +125,5 @@ playwright-report/
 *.swp
 *.swo
 *~
+.vercel
+.env*.local

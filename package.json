@@ -1,7 +1,12 @@
 {
   "name": "centinela-cloud",
   "private": true,
-  "workspaces": ["backend", "frontend", "agents"],
+  "workspaces": [
+    "backend",
+    "frontend",
+    "agents",
+    "collector"
+  ],
   "engines": {
     "node": ">=20.11"
   },
