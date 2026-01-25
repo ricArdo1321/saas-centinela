@@ -1,6 +1,6 @@
 /**
  * FortiGate Syslog Parser
- * 
+ *
  * Parses FortiGate syslog messages in key=value format.
  * Handles quoted values, nested quotes, and special characters.
  */
@@ -73,9 +73,9 @@ export interface ParsedFortiGateLog {
 
 /**
  * Parse a FortiGate syslog message into structured fields.
- * 
+ *
  * FortiGate format: key1=value1 key2="quoted value" key3=unquoted
- * 
+ *
  * @param rawMessage - The raw syslog message string
  * @returns Parsed log object with extracted fields
  */
@@ -83,7 +83,7 @@ export function parseFortiGateLog(rawMessage: string): ParsedFortiGateLog {
     const rawKv: Record<string, string> = {};
 
     // Remove syslog priority prefix if present (e.g., "<134>")
-    let message = rawMessage.replace(/^<\d+>/, '').trim();
+    const message = rawMessage.replace(/^<\d+>/, '').trim();
 
     // Regex to match key=value pairs
     // Handles: key=value, key="quoted value", key="value with \"escaped\" quotes"
@@ -183,14 +183,13 @@ export function parseFortiGateLog(rawMessage: string): ParsedFortiGateLog {
 
 /**
  * Determine the normalized event type from FortiGate log fields.
- * 
+ *
  * @param parsed - Parsed FortiGate log
  * @returns Normalized event type string
  */
 export function getEventType(parsed: ParsedFortiGateLog): string {
     const type = parsed.type?.toLowerCase() ?? '';
     const subtype = parsed.subtype?.toLowerCase() ?? '';
-    const logid = parsed.logid ?? '';
 
     // VPN events
     if (subtype === 'vpn') {
@@ -244,7 +243,7 @@ export function getEventType(parsed: ParsedFortiGateLog): string {
 
 /**
  * Map FortiGate level to normalized severity.
- * 
+ *
  * @param level - FortiGate level string
  * @returns Normalized severity: info, low, medium, high, critical
  */
@@ -269,7 +268,7 @@ export function mapSeverity(level: string | undefined): string {
 
 /**
  * Parse FortiGate timestamp to Date object.
- * 
+ *
  * @param date - Date string (YYYY-MM-DD)
  * @param time - Time string (HH:MM:SS)
  * @param tz - Timezone offset (e.g., "-0300")
@@ -301,7 +300,7 @@ export function parseTimestamp(
 /**
  * Extract source IP from UI field if present.
  * Example: "GUI(107.216.131.59)" -> "107.216.131.59"
- * 
+ *
  * @param ui - UI field value
  * @returns Extracted IP or undefined
  */

@@ -1,4 +1,4 @@
-import { Job } from 'bullmq';
+import type { Job } from 'bullmq';
 import { createWorker, QUEUE_NAMES } from '../lib/queue.js';
 import { analyzeDetectionWithAI } from '../services/ai-client.js';
 import type { Detection } from '../services/rules-engine.js';

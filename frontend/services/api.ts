@@ -115,5 +115,45 @@ export const api = {
       valid_patterns: result.stats?.valid_patterns ?? 0,
       total_hits: result.stats?.total_hits ?? 0
     };
+  },
+
+  /**
+   * Sources Management
+   */
+  getSources: async (): Promise<any[]> => {
+    const response = await fetch(`${API_BASE_URL}/v1/sources`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) throw new Error('Failed to fetch sources');
+    const result = await response.json();
+    return result.data;
+  },
+
+  createSource: async (data: { name: string; type: string; site_id?: string }): Promise<any> => {
+    const response = await fetch(`${API_BASE_URL}/v1/sources`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to create source');
+    const result = await response.json();
+    return result.data;
+  },
+
+  deleteSource: async (id: string): Promise<void> => {
+    const response = await fetch(`${API_BASE_URL}/v1/sources/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) throw new Error('Failed to delete source');
   }
+};
+
+// Helper to get auth headers from localStorage (assuming token is stored there)
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
 };

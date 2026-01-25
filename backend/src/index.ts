@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { testConnection, closeDatabase } from './db/index.js';
 import { dashboardRoutes } from './routes/dashboard.js';
+import { sourcesRoutes } from './routes/sources.js';
 import authPlugin from './plugins/auth.js';
 import tenantRateLimitPlugin from './plugins/rate-limit-tenant.js';
 import { ingestQueue } from './lib/queue.js';
@@ -51,7 +52,7 @@ const BulkSyslogIngestBodySchema = z.object({
   events: z.array(SyslogIngestBodySchema).min(1).max(100),
 });
 
-type SyslogIngestBody = z.infer<typeof SyslogIngestBodySchema>;
+type _SyslogIngestBody = z.infer<typeof SyslogIngestBodySchema>;
 type _BulkSyslogIngestBody = z.infer<typeof BulkSyslogIngestBodySchema>;
 
 async function main() {
@@ -130,6 +131,7 @@ async function main() {
 
   // Register Routes
   await app.register(dashboardRoutes);
+  await app.register(sourcesRoutes);
 
   app.get('/healthz', async () => {
     return { ok: true, service: 'centinela-backend', ts: new Date().toISOString() };

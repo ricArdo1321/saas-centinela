@@ -1,4 +1,4 @@
-import { Job } from 'bullmq';
+import type { Job } from 'bullmq';
 import { createWorker, QUEUE_NAMES } from '../lib/queue.js';
 import { sql } from '../db/index.js';
 

@@ -1,6 +1,6 @@
 /**
  * Detection Rules Engine
- * 
+ *
  * Evaluates normalized events against security rules and creates detections.
  */
 
@@ -79,7 +79,7 @@ export const RULES: RuleConfig[] = [
 
 /**
  * Run detection rules against recent normalized events.
- * 
+ *
  * @param lookbackMinutes - How far back to look for events (default: 15)
  * @returns Number of new detections created
  */
@@ -94,7 +94,7 @@ export async function runDetectionRules(lookbackMinutes: number = 15): Promise<n
                 await createDetection(detection);
                 detectionsCreated++;
                 console.log(`🚨 Detection: ${detection.detection_type} - ${detection.group_key} (${detection.event_count} events)`);
-            } catch (error) {
+            } catch (_error) {
                 // Likely duplicate detection, skip
                 console.log(`⏭️  Skipping duplicate detection: ${detection.detection_type} - ${detection.group_key}`);
             }
@@ -109,9 +109,6 @@ export async function runDetectionRules(lookbackMinutes: number = 15): Promise<n
  */
 async function evaluateRule(rule: RuleConfig, lookbackMinutes: number): Promise<Detection[]> {
     const since = new Date(Date.now() - lookbackMinutes * 60 * 1000);
-
-    // Build the event types filter
-    const eventTypesPlaceholder = rule.eventTypes.map((_, i) => `$${i + 2}`).join(', ');
 
     // Query to group events by the groupBy field
     let groupByColumn: string;
@@ -131,7 +128,7 @@ async function evaluateRule(rule: RuleConfig, lookbackMinutes: number): Promise<
 
     // Query for aggregated events
     const results = await sql`
-    SELECT 
+    SELECT
       tenant_id,
       site_id,
       source_id,
@@ -238,14 +235,14 @@ async function createDetection(detection: Detection): Promise<string> {
  */
 export async function getUnreportedDetections(tenantId: string): Promise<Detection[]> {
     const results = await sql`
-    SELECT 
+    SELECT
       tenant_id, site_id, source_id, detection_type, severity,
       group_key, event_count, first_event_at, last_event_at,
       evidence, related_event_ids
     FROM detections
     WHERE tenant_id = ${tenantId}
       AND reported_digest_id IS NULL
-    ORDER BY 
+    ORDER BY
       CASE severity
         WHEN 'critical' THEN 1
         WHEN 'high' THEN 2

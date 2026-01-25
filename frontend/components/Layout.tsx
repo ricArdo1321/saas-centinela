@@ -9,7 +9,8 @@ import {
   Bell,
   Search,
   Menu,
-  LogOut
+  LogOut,
+  Server
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRealTimeAlerts } from '../hooks/useRealTimeAlerts';
@@ -55,6 +56,7 @@ export const Layout = ({ children }: { children?: React.ReactNode }) => {
           <NavItem to="/detections" icon={ShieldAlert} label="Detecciones" />
           <NavItem to="/ai-reports" icon={FileText} label="Reportes IA" />
           <NavItem to="/cache" icon={Cpu} label="Caché Intel" />
+          <NavItem to="/sources" icon={Server} label="Fuentes" />
           <NavItem to="/settings" icon={Settings} label="Configuración" />
         </div>
 

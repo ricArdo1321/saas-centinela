@@ -1,10 +1,10 @@
 /**
  * Dashboard Routes
- * 
+ *
  * API endpoints for the Centinela dashboard frontend.
  */
 
-import { FastifyInstance, FastifyPluginOptions } from 'fastify';
+import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { sql } from '../db/index.js';
 
 export async function dashboardRoutes(
@@ -25,7 +25,7 @@ export async function dashboardRoutes(
 
             // Detections by severity (last 24h)
             const detectionStats = await sql`
-        SELECT 
+        SELECT
           severity,
           COUNT(*) as count
         FROM detections
@@ -35,7 +35,7 @@ export async function dashboardRoutes(
 
             // Events processed (last 24h)
             const eventStats = await sql`
-        SELECT 
+        SELECT
           COUNT(*) FILTER (WHERE created_at >= ${last24h.toISOString()}) as last_24h,
           COUNT(*) FILTER (WHERE created_at >= ${last7d.toISOString()}) as last_7d
         FROM normalized_events
@@ -43,7 +43,7 @@ export async function dashboardRoutes(
 
             // AI Cache stats
             const cacheStats = await sql`
-        SELECT 
+        SELECT
           COUNT(*) as total_patterns,
           COUNT(*) FILTER (WHERE is_valid = TRUE AND expires_at > NOW()) as valid_patterns,
           COALESCE(SUM(hit_count), 0) as total_hits
@@ -52,7 +52,7 @@ export async function dashboardRoutes(
 
             // Digests sent (last 24h)
             const digestStats = await sql`
-        SELECT 
+        SELECT
           COUNT(*) FILTER (WHERE sent_at >= ${last24h.toISOString()}) as last_24h,
           COUNT(*) FILTER (WHERE sent_at >= ${last7d.toISOString()}) as last_7d
         FROM email_deliveries
@@ -145,8 +145,8 @@ export async function dashboardRoutes(
             let detections;
             if (query.severity) {
                 detections = await sql`
-          SELECT 
-            id, tenant_id, site_id, detection_type, severity, 
+          SELECT
+            id, tenant_id, site_id, detection_type, severity,
             group_key, event_count, first_event_at, last_event_at,
             evidence, reported_digest_id, created_at
           FROM detections
@@ -156,8 +156,8 @@ export async function dashboardRoutes(
         `;
             } else {
                 detections = await sql`
-          SELECT 
-            id, tenant_id, site_id, detection_type, severity, 
+          SELECT
+            id, tenant_id, site_id, detection_type, severity,
             group_key, event_count, first_event_at, last_event_at,
             evidence, reported_digest_id, created_at
           FROM detections
@@ -200,7 +200,7 @@ export async function dashboardRoutes(
 
             // Get related AI analysis
             const analyses = await sql`
-        SELECT * FROM ai_analyses 
+        SELECT * FROM ai_analyses
         WHERE id IN (
           SELECT ai_analysis_id FROM ai_recommendations WHERE detection_id = ${id}
         )
@@ -245,7 +245,7 @@ export async function dashboardRoutes(
             const offset = parseInt(query.offset || '0', 10);
 
             const analyses = await sql`
-        SELECT 
+        SELECT
           id, tenant_id, analyzed_at, threat_detected, threat_type,
           confidence_score, severity, context_summary, model_used,
           tokens_used, latency_ms, created_at
@@ -284,7 +284,7 @@ export async function dashboardRoutes(
             const offset = parseInt(query.offset || '0', 10);
 
             const reports = await sql`
-        SELECT 
+        SELECT
           id, tenant_id, detection_id, subject, body, severity,
           threat_type, model_used, tokens_used, latency_ms,
           status, sent_at, created_at
@@ -319,7 +319,7 @@ export async function dashboardRoutes(
     app.get('/v1/ai/cache/stats', async (req, reply) => {
         try {
             const stats = await sql`
-        SELECT 
+        SELECT
           COUNT(*) as total_patterns,
           COUNT(*) FILTER (WHERE is_valid = TRUE AND expires_at > NOW()) as valid_patterns,
           COUNT(*) FILTER (WHERE is_valid = FALSE OR expires_at <= NOW()) as expired_patterns,
@@ -329,7 +329,7 @@ export async function dashboardRoutes(
       `;
 
             const topPatterns = await sql`
-        SELECT 
+        SELECT
           pattern_signature, detection_type, severity, hit_count, last_hit_at, expires_at
         FROM ai_knowledge_cache
         WHERE is_valid = TRUE AND expires_at > NOW()
@@ -366,7 +366,7 @@ export async function dashboardRoutes(
             const offset = parseInt(query.offset || '0', 10);
 
             const patterns = await sql`
-        SELECT 
+        SELECT
           id, pattern_signature, detection_type, severity,
           threat_detected, threat_type, hit_count, last_hit_at,
           is_valid, expires_at, created_at
@@ -405,7 +405,7 @@ export async function dashboardRoutes(
             const offset = parseInt(query.offset || '0', 10);
 
             const digests = await sql`
-        SELECT 
+        SELECT
           d.id, d.tenant_id, d.window_start, d.window_end, d.severity,
           d.detection_count, d.event_count, d.subject, d.locale,
           d.ai_report_id, d.created_at,
@@ -445,7 +445,7 @@ export async function dashboardRoutes(
 
             // Get recent detections
             const recentDetections = await sql`
-        SELECT 
+        SELECT
           id, 'detection' as type, detection_type as title, severity,
           created_at as timestamp
         FROM detections
@@ -455,7 +455,7 @@ export async function dashboardRoutes(
 
             // Get recent AI reports
             const recentReports = await sql`
-        SELECT 
+        SELECT
           id, 'ai_report' as type, subject as title, severity,
           created_at as timestamp
         FROM ai_reports
@@ -465,7 +465,7 @@ export async function dashboardRoutes(
 
             // Get recent digests sent
             const recentDigests = await sql`
-        SELECT 
+        SELECT
           d.id, 'digest' as type, d.subject as title, d.severity,
           d.created_at as timestamp
         FROM digests d

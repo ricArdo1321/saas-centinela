@@ -1,4 +1,4 @@
-import { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
 import crypto from 'node:crypto';
 import { sql } from '../db/index.js';
@@ -13,6 +13,7 @@ declare module 'fastify' {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AuthPluginOptions {
   // Add options if needed
 }

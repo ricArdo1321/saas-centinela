@@ -1,3 +1,4 @@
+```saas centinela/saas-centinela/agents/analyst/index.ts
 import Fastify from 'fastify';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
@@ -21,7 +22,7 @@ const MODEL_NAME = process.env.ANALYZER_MODEL || 'gpt-4o-mini';
 
 // Prompt Template
 const SYSTEM_PROMPT = `
-You are an Expert Cybersecurity Analyst specialized in Fortinet FortiGate logs. 
+You are an Expert Cybersecurity Analyst specialized in Fortinet FortiGate logs.
 Your goal is to analyze security events to distinguish between False Positives and Real Threats.
 
 Analyze the provided Event Data (Detection + Raw Logs + Normalized Logs).

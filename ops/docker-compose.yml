@@ -1,3 +1,4 @@
+```saas centinela/saas-centinela/ops/docker-compose.yml
 name: centinela
 
 services:
@@ -38,8 +39,122 @@ services:
       timeout: 3s
       retries: 20
 
+  # ==========================================
+  # AI AGENTS (Microservices)
+  # ==========================================
+
+  orchestrator:
+    build:
+      context: ../agents
+      dockerfile: Dockerfile
+      args:
+        AGENT: orchestrator
+    container_name: centinela-orchestrator
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      ANALYST_URL: http://analyst:8081
+      ADVISOR_URL: http://advisor:8082
+      JUDGE_URL: http://judge:8083
+      WRITER_URL: http://writer:8084
+      LOG_LEVEL: info
+    ports:
+      - "8080:8080"
+    depends_on:
+      - analyst
+      - advisor
+      - judge
+      - writer
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  analyst:
+    build:
+      context: ../agents
+      dockerfile: Dockerfile
+      args:
+        AGENT: analyst
+    container_name: centinela-analyst
+    restart: unless-stopped
+    environment:
+      PORT: 8081
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LOG_LEVEL: info
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  advisor:
+    build:
+      context: ../agents
+      dockerfile: Dockerfile
+      args:
+        AGENT: advisor
+    container_name: centinela-advisor
+    restart: unless-stopped
+    environment:
+      PORT: 8082
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LOG_LEVEL: info
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  judge:
+    build:
+      context: ../agents
+      dockerfile: Dockerfile
+      args:
+        AGENT: judge
+    container_name: centinela-judge
+    restart: unless-stopped
+    environment:
+      PORT: 8083
+      LOG_LEVEL: info
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8083/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  writer:
+    build:
+      context: ../agents
+      dockerfile: Dockerfile
+      args:
+        AGENT: writer
+    container_name: centinela-writer
+    restart: unless-stopped
+    environment:
+      PORT: 8084
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LOG_LEVEL: info
+    ports:
+      - "8084:8084"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8084/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ==========================================
+  # CORE SERVICES
+  # ==========================================
+
   backend:
-    # Placeholder: you will build this from ./backend once Dockerfile exists
     build:
       context: ../backend
       dockerfile: Dockerfile
@@ -52,8 +167,12 @@ services:
       # DB
       DATABASE_URL: ${DATABASE_URL:-postgres://centinela:centinela_dev_password@postgres:5432/centinela}
 
-      # Redis (optional but wired)
+      # Redis
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+
+      # AI Integration
+      ATA_ORCHESTRATOR_URL: ${ATA_ORCHESTRATOR_URL:-http://orchestrator:8080}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
 
       # Ingest auth (collector -> backend)
       INGEST_SHARED_SECRET: ${INGEST_SHARED_SECRET:-change_me_dev_secret}
@@ -74,12 +193,17 @@ services:
 
       # Public URL (used for links in emails)
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+
+      # CORS
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3001
     ports:
       - "${BACKEND_PORT:-3000}:${BACKEND_PORT_INTERNAL:-3000}"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      orchestrator:
         condition: service_healthy
     healthcheck:
       test:
@@ -92,7 +216,6 @@ services:
       retries: 20
 
   collector:
-    # Placeholder: you will build this from ./collector once Dockerfile exists
     build:
       context: ../collector
       dockerfile: Dockerfile
@@ -114,7 +237,7 @@ services:
       LISTEN_UDP: ${LISTEN_UDP:-:5514}
       LISTEN_TCP: ${LISTEN_TCP:-:5514}
 
-      # Optional: tag incoming messages (helpful for debugging)
+      # Optional: tag incoming messages
       COLLECTOR_NAME: ${COLLECTOR_NAME:-collector-local}
     ports:
       # Non-privileged default port for local dev (5514). Map to 514 in production if desired.

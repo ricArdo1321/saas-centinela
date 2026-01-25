@@ -1,3 +1,4 @@
+```saas centinela/saas-centinela/agents/advisor/index.ts
 import Fastify from 'fastify';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
@@ -20,7 +21,7 @@ const MODEL_NAME = process.env.ADVISOR_MODEL || 'gpt-4o-mini';
 
 // Prompt Template
 const SYSTEM_PROMPT = `
-You are an Expert Fortinet FortiOS Administrator. 
+You are an Expert Fortinet FortiOS Administrator.
 Your goal is to provide precise CLI commands to mitigate security threats identified by an analyst.
 
 RULES:

@@ -8,6 +8,7 @@ import { Cache } from './pages/Cache';
 import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+import { Sources } from './pages/Sources';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './components/ToastSystem';
 import { LoadingSpinner } from './components/UI';
@@ -37,6 +38,7 @@ const AppRoutes = () => {
       <Route path="/detections" element={<ProtectedRoute><Detections /></ProtectedRoute>} />
       <Route path="/ai-reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
       <Route path="/cache" element={<ProtectedRoute><Cache /></ProtectedRoute>} />
+      <Route path="/sources" element={<ProtectedRoute><Sources /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />

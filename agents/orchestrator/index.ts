@@ -1,3 +1,4 @@
+```saas centinela/saas-centinela/agents/orchestrator/index.ts
 import Fastify from 'fastify';
 import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
@@ -35,7 +36,12 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...payload, request_id: reqId })
     });
-    if (!analystRes.ok) throw new Error(`Analyst failed: ${analystRes.statusText}`);
+
+    if (!analystRes.ok) {
+        const errText = await analystRes.text();
+        throw new Error(`Analyst failed (${analystRes.status}): ${errText}`);
+    }
+
     const analysis = await analystRes.json() as any;
     fastify.log.info({ reqId, threat: analysis.threat_detected }, '⬅️ Analyst returned');
 
@@ -55,7 +61,12 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
         analysis
       })
     });
-    if (!advisorRes.ok) throw new Error(`Advisor failed: ${advisorRes.statusText}`);
+
+    if (!advisorRes.ok) {
+        const errText = await advisorRes.text();
+        throw new Error(`Advisor failed (${advisorRes.status}): ${errText}`);
+    }
+
     const recommendations = await advisorRes.json() as any;
     fastify.log.info({ reqId, actions: recommendations.actions?.length }, '⬅️ Advisor returned');
 
@@ -79,7 +90,12 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
           commands: allCommands
         })
       });
-      if (!judgeRes.ok) throw new Error(`Judge failed: ${judgeRes.statusText}`);
+
+      if (!judgeRes.ok) {
+         const errText = await judgeRes.text();
+         throw new Error(`Judge failed (${judgeRes.status}): ${errText}`);
+      }
+
       judgeResult = await judgeRes.json() as any;
       fastify.log.info({ reqId, verdict: judgeResult.result }, '⬅️ Judge returned');
     }
@@ -93,10 +109,16 @@ fastify.post('/v1/ata/orchestrate', async (request, reply) => {
         request_id: reqId,
         tenant_id: tenantId,
         analysis,
-        recommendations
+        recommendations,
+        judge: judgeResult
       })
     });
-    if (!writerRes.ok) throw new Error(`Writer failed: ${writerRes.statusText}`);
+
+    if (!writerRes.ok) {
+        const errText = await writerRes.text();
+        throw new Error(`Writer failed (${writerRes.status}): ${errText}`);
+    }
+
     const report = await writerRes.json() as any;
     fastify.log.info({ reqId }, '⬅️ Writer returned');
 
@@ -127,7 +149,7 @@ fastify.get('/healthz', async () => {
   return { status: 'ok', agent: 'orchestrator' };
 });
 
-const PORT = 8080;
+const PORT = parseInt(process.env.PORT || '8080');
 const start = async () => {
   try {
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
