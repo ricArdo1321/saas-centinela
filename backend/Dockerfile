@@ -45,6 +45,8 @@ RUN addgroup -S app && adduser -S app -G app
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# Copy SQL migration files (not compiled by TypeScript)
+COPY src/db/migrations ./dist/db/migrations
 COPY package.json ./
 
 EXPOSE 3000
