@@ -1,5 +1,6 @@
 import { Redis } from 'ioredis';
 
+const REDIS_URL = process.env['REDIS_URL'];
 const REDIS_HOST = process.env['REDIS_HOST'] || 'localhost';
 const REDIS_PORT = parseInt(process.env['REDIS_PORT'] || '6379', 10);
 const REDIS_PASSWORD = process.env['REDIS_PASSWORD'] || undefined;
@@ -10,19 +11,20 @@ const REDIS_PASSWORD = process.env['REDIS_PASSWORD'] || undefined;
  * 
  * Note: BullMQ requires maxRetriesPerRequest to be null
  */
-export const redis = new Redis({
-    host: REDIS_HOST,
-    port: REDIS_PORT,
-    ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
-    maxRetriesPerRequest: null,
-    // Enable reconnect
-    retryStrategy: (times: number) => {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-    },
-    // Connection event logging
-    lazyConnect: false,
-});
+export const redis = REDIS_URL
+    ? new Redis(REDIS_URL, {
+        maxRetriesPerRequest: null,
+        retryStrategy: (times: number) => Math.min(times * 50, 2000),
+        lazyConnect: false
+    })
+    : new Redis({
+        host: REDIS_HOST,
+        port: REDIS_PORT,
+        ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
+        maxRetriesPerRequest: null,
+        retryStrategy: (times: number) => Math.min(times * 50, 2000),
+        lazyConnect: false,
+    });
 
 redis.on('connect', () => {
     console.log('🔗 Redis connected');
